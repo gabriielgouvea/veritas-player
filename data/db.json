@@ -1,0 +1,44 @@
+{
+  "ads_config": [
+    {
+      "id": "demo_1",
+      "nome": "Max Titanium - Promo\u00e7\u00e3o",
+      "arquivo": "max_titanium.mp4",
+      "ativo": true,
+      "frequencia": {
+        "dias": [
+          "seg",
+          "qua",
+          "sex"
+        ],
+        "horarios": [
+          "10:00",
+          "16:00",
+          "20:00"
+        ],
+        "data_especifica": ""
+      }
+    },
+    {
+      "id": "ad_0",
+      "nome": "TESTE",
+      "arquivo": "YTDown.com_YouTube_Media_23mqXYifxIQ_001_720p.mp4",
+      "ativo": true,
+      "frequencia": {
+        "dias": [
+          "seg",
+          "ter",
+          "qua",
+          "qui",
+          "sex"
+        ],
+        "horarios": [
+          "10:00",
+          "21:30",
+          "23:02"
+        ],
+        "data_especifica": ""
+      }
+    }
+  ]
+}
