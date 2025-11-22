@@ -1,24 +1,30 @@
 [
     {
-        "id": 1763698703,
-        "nome": "SABAO YPE",
+        "id": 1763756710,
+        "nome": "SAB\u00c3O YP\u00ca",
         "autorizado": "Basa",
-        "video": "C:/VisioDeck_System/media/ads/Promo\u00e7\u00e3o Yp\u00ea 75 Anos no Mundo M\u00e1gico de OZ!.mp4",
+        "video": "E:/PROPAGANDA --------/Promo\u00e7\u00e3o Yp\u00ea 75 Anos no Mundo M\u00e1gico de OZ!.mp4",
         "ativo": true,
         "modo": "POR PER\u00cdODO",
         "horarios": [
-            "01:21",
-            "01:22"
+            "20:22"
         ],
         "inicio": "21/11/2025",
-        "fim": "21/11/2025",
-        "dias": [],
-        "somente_hoje": true,
+        "fim": "INDETERMINADO",
+        "dias": [
+            "seg",
+            "ter",
+            "qua",
+            "qui",
+            "sex",
+            "sab",
+            "dom"
+        ],
+        "somente_hoje": false,
         "datas_especificas": [],
         "execucoes_hoje": [
-            "01:19",
-            "01:21",
-            "01:22"
+            "17:27",
+            "20:22"
         ]
     }
 ]
