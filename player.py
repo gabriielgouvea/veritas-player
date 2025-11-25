@@ -1,4 +1,4 @@
-# player.py
+# player.py (Versão 18.0 - FINAL COMPLETA - SEM CORTES)
 import customtkinter as ctk
 import tkinter as tk
 import vlc
@@ -6,28 +6,53 @@ import os
 import time
 import json
 import random
+import pyautogui 
 from datetime import datetime
 from config import *
 from utils import ToolTip, carregar_db, salvar_db
 from dashboard import DashboardWindow
 
+# --- FIX DE DLLs DO VLC NO WINDOWS ---
+# Garante que o Python encontre as DLLs do VLC na pasta local
+if os.name == 'nt':
+    try:
+        os.add_dll_directory(os.getcwd())
+    except:
+        pass
+
 class VisioDeckPlayer(ctk.CTk):
     def __init__(self):
         super().__init__()
+        
+        # Configuração da Janela Principal
         self.title("Veritas Player")
         self.configure(fg_color=VERITAS_PLAYER_BG)
-        
-        # Janela
         self.geometry("1200x800")
+        
+        # Maximiza após 100ms para evitar bugs visuais no Tkinter
         self.after(100, lambda: self.state("zoomed"))
         self.is_fullscreen = False
         
-        # VLC
-        # Flags para evitar travamentos e sobreposição de janela
-        self.vlc = vlc.Instance("--no-xlib", "--input-repeat=0", "--disable-screensaver", "--avcodec-hw=none")
-        self.player = self.vlc.media_player_new()
+        # --- CONFIGURAÇÃO DOS PLAYERS (DUAL INSTANCE) ---
         
-        # Estado Inicial
+        # PLAYER 1: VÍDEO DE TREINO
+        # Usa aceleração de hardware (avcodec-hw) e output padrão (WASAPI/DirectX)
+        # Isso garante performance máxima em vídeos 4K/1080p
+        self.vlc_video = vlc.Instance(
+            "--no-xlib", 
+            "--input-repeat=0", 
+            "--disable-screensaver", 
+            "--avcodec-hw=none"
+        )
+        self.player = self.vlc_video.media_player_new()
+        
+        # PLAYER 2: LOCUTOR / TTS
+        # Força saída via DirectSound para evitar conflito com o driver de vídeo (Erro 0x88890008)
+        # Isso permite tocar o áudio "por cima" ou enquanto o vídeo pausa
+        self.vlc_audio = vlc.Instance("--aout=directsound") 
+        self.tts_player = self.vlc_audio.media_player_new()
+        
+        # --- VARIÁVEIS DE ESTADO ---
         self.pasta_treino = ""
         if os.path.exists(LAST_PATHS_FILE):
             try: 
@@ -42,173 +67,342 @@ class VisioDeckPlayer(ctk.CTk):
         self.idx_video = 0
         self.is_playing = False
         
-        # Modos de Interrupção
-        self.modo_ad = False       # Interrupção por Vídeo Comercial
-        self.modo_tts = False      # Interrupção por Locutor (Áudio)
+        # Flags de Interrupção
+        self.modo_ad = False       # True quando está passando vídeo comercial
+        self.modo_tts = False      # True quando o locutor está falando
         
-        self.mem_time = 0
-        self.video_atual = "" 
+        # Memória de Reprodução
+        self.mem_time = 0          # Guarda o tempo exato onde o vídeo parou
+        self.video_atual = ""      # Guarda o caminho do vídeo atual
+        self.saved_volume = 100    # Guarda o volume do vídeo antes do anúncio
+        
+        # Controle de Loops e Logs
         self.hist_minuto = [] 
         self.data_cache = datetime.now().strftime("%d/%m/%Y")
         
-        # Estados de Controle
+        # Controles do Usuário
         self.shuffle = False
-        self.repeat_state = 0 # 0=Off, 1=Loop Infinito, 2=Loop 1x
+        self.repeat_state = 0      # 0=Off, 1=Infinito (Loop Playlist), 2=Uma Vez (Loop 1x Video)
         self.repeat_one_done = False 
         
         self.muted = False
         self.last_vol = 100
+        
+        # Controle de Interface (Mouse e Ocultação)
         self.last_mouse = (0,0)
         self.controls_on = False
         self.hide_task = None
         self.last_ad_timestamp = 0
 
-        # Layout Principal
+        # --- CONFIGURAÇÃO DO LAYOUT (GRID) ---
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
-        # Frame do Vídeo
+        # Frame de Vídeo (Fundo)
         self.video_frame = tk.Frame(self, bg="black")
         self.video_frame.grid(row=0, column=0, sticky="nsew")
+        
+        # Canvas VLC (Onde o vídeo é desenhado)
         self.canvas = tk.Canvas(self.video_frame, bg="black", highlightthickness=0)
         self.canvas.pack(fill="both", expand=True)
         
-        # --- BARRA DE CONTROLE ---
-        self.controls = ctk.CTkFrame(self, fg_color="#111", height=150, corner_radius=15, border_width=1, border_color="#333")
+        # --- BARRA DE CONTROLES FLUTUANTE ---
+        self.controls = ctk.CTkFrame(
+            self, 
+            fg_color="#111", 
+            height=150, 
+            corner_radius=15, 
+            border_width=1, 
+            border_color="#333"
+        )
         
-        # Slider de Progresso
-        self.slider = ctk.CTkSlider(self.controls, from_=0, to=1000, command=self.seek, progress_color=VERITAS_BLUE, button_color=VERITAS_BLUE, button_hover_color=VERITAS_BLUE_HOVER, fg_color="#333", height=16)
+        # 1. Slider de Progresso (Topo)
+        self.slider = ctk.CTkSlider(
+            self.controls, 
+            from_=0, 
+            to=1000, 
+            command=self.seek, 
+            progress_color=VERITAS_BLUE, 
+            button_color=VERITAS_BLUE, 
+            button_hover_color=VERITAS_BLUE_HOVER, 
+            fg_color="#333", 
+            height=16
+        )
         self.slider.pack(fill="x", padx=30, pady=(15, 5))
         ToolTip(self.slider, "Progresso do Vídeo")
         
-        # Área dos Botões
+        # Container dos Botões
         bot_area = ctk.CTkFrame(self.controls, fg_color="transparent")
         bot_area.pack(fill="both", expand=True, padx=30, pady=(5, 15))
         
-        # LADO ESQUERDO
+        # --- GRUPO ESQUERDA: Shuffle e Tempo ---
         left_c = ctk.CTkFrame(bot_area, fg_color="transparent")
         left_c.pack(side="left")
         
-        self.btn_shuf = ctk.CTkButton(left_c, text="🔀", width=40, height=40, fg_color="transparent", font=("Arial", 20), command=self.toggle_shuffle, hover_color="#333", text_color="#777")
+        self.btn_shuf = ctk.CTkButton(
+            left_c, 
+            text="🔀", 
+            width=40, 
+            height=40, 
+            fg_color="transparent", 
+            font=("Arial", 20), 
+            command=self.toggle_shuffle, 
+            hover_color="#333", 
+            text_color="#777"
+        )
         self.btn_shuf.pack(side="left", padx=(0,10))
-        ToolTip(self.btn_shuf, "Vídeo Aleatório") 
+        ToolTip(self.btn_shuf, "Vídeo Aleatório")
         
-        self.lbl_time = ctk.CTkLabel(left_c, text="00:00 / 00:00", font=("Segoe UI", 12), text_color="#AAA")
+        self.lbl_time = ctk.CTkLabel(
+            left_c, 
+            text="00:00 / 00:00", 
+            font=("Segoe UI", 12), 
+            text_color="#AAA"
+        )
         self.lbl_time.pack(side="left")
 
-        # CENTRO (Controles Principais)
+        # --- GRUPO CENTRO: Playback ---
         center_c = ctk.CTkFrame(bot_area, fg_color="transparent")
         center_c.place(relx=0.5, rely=0.5, anchor="center")
         
-        btn_std = {"fg_color": "transparent", "text_color": "#EEE", "hover_color": "#333", "width": 50, "height": 50, "font": ("Arial", 24)}
+        # Estilo padrão dos botões médios
+        btn_std = {
+            "fg_color": "transparent", 
+            "text_color": "#EEE", 
+            "hover_color": "#333", 
+            "width": 50, 
+            "height": 50, 
+            "font": ("Arial", 24)
+        }
         
         # Botão Anterior
         self.btn_prev = ctk.CTkButton(center_c, text="⏮", command=self.prev, **btn_std)
         self.btn_prev.pack(side="left", padx=5)
-        ToolTip(self.btn_prev, "Vídeo Anterior") 
+        ToolTip(self.btn_prev, "Vídeo Anterior")
         
-        # Botão -10s
-        self.btn_rewind = ctk.CTkButton(center_c, text="↺ 10", command=lambda: self.skip_time(-10), fg_color="transparent", text_color="#DDD", hover_color="#333", width=50, height=50, font=("Segoe UI", 12, "bold"))
+        # Botão Voltar 10s
+        self.btn_rewind = ctk.CTkButton(
+            center_c, 
+            text="↺ 10", 
+            command=lambda: self.skip_time(-10), 
+            fg_color="transparent", 
+            text_color="#DDD", 
+            hover_color="#333", 
+            width=50, 
+            height=50, 
+            font=("Segoe UI", 12, "bold")
+        )
         self.btn_rewind.pack(side="left", padx=5)
-        ToolTip(self.btn_rewind, "Voltar 10 Segundos") 
+        ToolTip(self.btn_rewind, "Voltar 10 Segundos")
 
-        # Botão Play/Pause
-        self.btn_play = ctk.CTkButton(center_c, text="⏯", command=self.play_pause, width=70, height=70, corner_radius=35, fg_color=VERITAS_BLUE, hover_color=VERITAS_BLUE_HOVER, font=("Arial", 30))
+        # Botão PLAY/PAUSE (Destaque)
+        self.btn_play = ctk.CTkButton(
+            center_c, 
+            text="⏯", 
+            command=self.play_pause, 
+            width=70, 
+            height=70, 
+            corner_radius=35, 
+            fg_color=VERITAS_BLUE, 
+            hover_color=VERITAS_BLUE_HOVER, 
+            font=("Arial", 30)
+        )
         self.btn_play.pack(side="left", padx=15)
-        ToolTip(self.btn_play, "Play / Pause") 
+        ToolTip(self.btn_play, "Play / Pause")
 
-        # Botão +10s
-        self.btn_fwd = ctk.CTkButton(center_c, text="↻ 10", command=lambda: self.skip_time(10), fg_color="transparent", text_color="#DDD", hover_color="#333", width=50, height=50, font=("Segoe UI", 12, "bold"))
+        # Botão Avançar 10s
+        self.btn_fwd = ctk.CTkButton(
+            center_c, 
+            text="↻ 10", 
+            command=lambda: self.skip_time(10), 
+            fg_color="transparent", 
+            text_color="#DDD", 
+            hover_color="#333", 
+            width=50, 
+            height=50, 
+            font=("Segoe UI", 12, "bold")
+        )
         self.btn_fwd.pack(side="left", padx=5)
-        ToolTip(self.btn_fwd, "Adiantar 10 Segundos") 
+        ToolTip(self.btn_fwd, "Adiantar 10 Segundos")
 
         # Botão Próximo
         self.btn_next = ctk.CTkButton(center_c, text="⏭", command=self.next, **btn_std)
         self.btn_next.pack(side="left", padx=5)
-        ToolTip(self.btn_next, "Próximo Vídeo") 
+        ToolTip(self.btn_next, "Próximo Vídeo")
         
-        # Botão Repetir
+        # Botão Repeat (3 Estados)
         self.btn_rep = ctk.CTkButton(center_c, text="🔁", command=self.toggle_repeat, **btn_std)
         self.btn_rep.pack(side="left", padx=(15, 0))
-        self.update_repeat_icon() 
+        self.update_repeat_icon() # Configura ícone e tooltip iniciais
 
-        # LADO DIREITO
+        # --- GRUPO DIREITA: Som e Janela ---
         right_c = ctk.CTkFrame(bot_area, fg_color="transparent")
         right_c.pack(side="right")
 
-        self.btn_mute = ctk.CTkButton(right_c, text="🔊", width=40, command=self.toggle_mute, fg_color="transparent", hover_color="#333", font=("Arial", 20))
+        self.btn_mute = ctk.CTkButton(
+            right_c, 
+            text="🔊", 
+            width=40, 
+            command=self.toggle_mute, 
+            fg_color="transparent", 
+            hover_color="#333", 
+            font=("Arial", 20)
+        )
         self.btn_mute.pack(side="left")
-        ToolTip(self.btn_mute, "Mudo / Som") 
+        ToolTip(self.btn_mute, "Mudo / Som")
         
-        self.sl_vol = ctk.CTkSlider(right_c, from_=0, to=100, width=100, command=self.set_vol, progress_color="white", button_color="white", button_hover_color="#DDD")
+        self.sl_vol = ctk.CTkSlider(
+            right_c, 
+            from_=0, 
+            to=100, 
+            width=100, 
+            command=self.set_vol, 
+            progress_color="white", 
+            button_color="white", 
+            button_hover_color="#DDD"
+        )
         self.sl_vol.set(100)
         self.sl_vol.pack(side="left", padx=10)
-        ToolTip(self.sl_vol, "Volume") 
+        ToolTip(self.sl_vol, "Volume")
         
-        self.btn_fs = ctk.CTkButton(right_c, text="⛶", width=40, command=self.toggle_fs, fg_color="transparent", hover_color="#333", font=("Arial", 20))
+        self.btn_fs = ctk.CTkButton(
+            right_c, 
+            text="⛶", 
+            width=40, 
+            command=self.toggle_fs, 
+            fg_color="transparent", 
+            hover_color="#333", 
+            font=("Arial", 20)
+        )
         self.btn_fs.pack(side="left")
-        ToolTip(self.btn_fs, "Tela Cheia") 
+        ToolTip(self.btn_fs, "Tela Cheia / Janela")
 
-        # AVISO CENTRAL
-        self.lbl_info = ctk.CTkLabel(self.canvas, text="Clique em AJUSTES para selecionar a pasta...", font=("Arial", 30), text_color="#555", bg_color="black")
+        # --- INFO CENTRAL (Overlay) ---
+        self.lbl_info = ctk.CTkLabel(
+            self.canvas, 
+            text="Clique em AJUSTES para selecionar a pasta...", 
+            font=("Arial", 30), 
+            text_color="#555", 
+            bg_color="black"
+        )
         self.lbl_info.place(relx=0.5, rely=0.5, anchor="center")
 
-        # CONTROLES SUPERIORES (Ajustes e Playlist)
-        self.btn_settings = ctk.CTkButton(self, text="⚙️  AJUSTES", command=self.open_dash, width=130, height=40, fg_color="white", text_color="black", hover_color="#DDD", font=("Segoe UI", 12, "bold"), corner_radius=20, bg_color="black")
+        # --- BOTÕES SUPERIORES (Config e Playlist) ---
+        
+        # Botão Ajustes
+        self.btn_settings = ctk.CTkButton(
+            self, 
+            text="⚙️  AJUSTES", 
+            command=self.open_dash, 
+            width=130, 
+            height=40, 
+            fg_color="white", 
+            text_color="black", 
+            hover_color="#DDD", 
+            font=("Segoe UI", 12, "bold"), 
+            corner_radius=20, 
+            bg_color="black"
+        )
         self.btn_settings.place(relx=0.98, rely=0.03, anchor="ne")
-        ToolTip(self.btn_settings, "Abrir Painel de Controle")
+        ToolTip(self.btn_settings, "Configurações e Uploads")
 
-        self.opt_playlist = ctk.CTkOptionMenu(self, values=["TODOS"], command=self.change_playlist, width=200, height=40, fg_color="#333", button_color="#444", text_color="white", button_hover_color="#555", font=("Segoe UI", 12, "bold"), dropdown_fg_color="#222", dropdown_text_color="white", bg_color="black")
+        # Menu de Playlist
+        self.opt_playlist = ctk.CTkOptionMenu(
+            self, 
+            values=["TODOS"], 
+            command=self.change_playlist, 
+            width=200, 
+            height=40, 
+            fg_color="#333", 
+            button_color="#444", 
+            text_color="white", 
+            button_hover_color="#555", 
+            font=("Segoe UI", 12, "bold"), 
+            dropdown_fg_color="#222", 
+            dropdown_text_color="white", 
+            bg_color="black"
+        )
         self.opt_playlist.place(relx=0.88, rely=0.03, anchor="ne")
         self.opt_playlist.set("TODOS")
-        ToolTip(self.opt_playlist, "Trocar Playlist")
+        ToolTip(self.opt_playlist, "Selecionar Playlist")
 
-        # Bindings
+        # --- BINDINGS ---
+        # Eventos de mouse e teclado
         self.bind_all("<Motion>", self.on_mouse_move)
         self.canvas.bind("<Motion>", self.on_mouse_move)
         self.bind_all("<Escape>", self.toggle_fs)
 
-        # Inicia Loops
+        # --- INICIALIZAÇÃO DO SISTEMA ---
         self.check_mouse_polling()
         self.sys_loop()
         self.ui_loop()
         
-        if self.pasta_treino: self.scan_folders()
+        # Carrega playlist se houver pasta salva
+        if self.pasta_treino: 
+            self.scan_folders()
+            
         self.show_controls()
 
+    # Abre o Dashboard
     def open_dash(self):
         DashboardWindow(self, self)
     
-    # --- FUNÇÃO DO LOCUTOR (NOVA) ---
-    def tocar_anuncio(self, arquivo_audio):
+    # --- FUNÇÃO CRÍTICA: LOCUTOR / TTS ---
+    # Gerencia a pausa externa, pausa interna e volume boost
+    def tocar_anuncio(self, arquivo_audio, volume_alvo=100):
         if not os.path.exists(arquivo_audio): return
 
-        # Salva o tempo atual para voltar depois
-        self.mem_time = self.player.get_time()
+        # 1. Controle Externo (DJ Mode)
+        # Tenta pausar o Spotify/Chrome apertando a tecla Media Play/Pause
+        try: 
+            pyautogui.press("playpause")
+        except: 
+            print("Erro ao controlar mídia externa")
+            
+        # Delay para o som baixar
+        time.sleep(0.5) 
+
+        # 2. Controle Interno (Vídeo)
+        # Pausa o vídeo e salva a posição
+        if self.is_playing:
+            self.player.pause()
+            self.mem_time = self.player.get_time()
         
-        # Ativa modo TTS
+        # 3. Gestão de Volume Inteligente
+        # Salva o volume atual do vídeo para restaurar depois
+        try:
+            self.saved_volume = self.player.audio_get_volume()
+            if self.saved_volume == -1: self.saved_volume = 100
+        except: 
+            self.saved_volume = 100
+
+        # 4. Configura Estado do Locutor
         self.modo_tts = True
+        self.btn_play.configure(text="⏸") # Mostra ícone de pause
         
-        # Toca o Áudio
-        self.player.set_media(self.vlc.media_new(arquivo_audio))
-        self.player.play()
-        self.is_playing = True
-        self.btn_play.configure(text="⏸")
+        # 5. Toca o Anúncio no Player Dedicado
+        self.tts_player.set_media(self.vlc_audio.media_new(arquivo_audio))
+        self.tts_player.audio_set_volume(int(volume_alvo)) # Aplica o boost
+        self.tts_player.play()
         
-        # Esconde controles para dar visual de "Aviso"
+        # 6. Oculta Interface (Modo Broadcast)
         self.controls.place_forget()
         self.configure(cursor="none")
 
+    # Troca de Playlist
     def change_playlist(self, name):
         if name in self.playlist_folders:
             self.current_playlist_name = name
             self.current_playlist = self.playlist_folders[name]
+            
             self.opt_playlist.set(name)
+            
             if self.current_playlist:
                 self.play_video(0, start_paused=False)
             else:
                 self.player.stop()
 
+    # Escaneia Pastas
     def scan_folders(self):
         self.playlist_folders = {"TODOS": []}
         try:
@@ -226,11 +420,11 @@ class VisioDeckPlayer(ctk.CTk):
                         self.playlist_folders["TODOS"].append(path)
                         self.playlist_folders[folder].append(path)
             
-            # Limpa pastas vazias
+            # Remove vazias
             empty = [k for k,v in self.playlist_folders.items() if not v]
             for k in empty: del self.playlist_folders[k]
             
-            # Atualiza Dropdown
+            # Atualiza menu
             pl_names = sorted(list(self.playlist_folders.keys()))
             if "TODOS" in pl_names: 
                 pl_names.remove("TODOS")
@@ -248,25 +442,35 @@ class VisioDeckPlayer(ctk.CTk):
                 self.lbl_info.configure(text="Nenhum vídeo encontrado!")
         except: pass
 
+    # --- LÓGICA DE REPRODUÇÃO DE VÍDEO ---
     def play_video(self, target, ad=False, resume=False, start_paused=False, keep_repeat=False):
         path = ""
         if ad:
             path = target 
         else:
             if not self.current_playlist: return
+            
             if isinstance(target, int): 
                 if target >= len(self.current_playlist): target = 0
                 self.idx_video = target
                 path = self.current_playlist[target]
             else:
                 path = target
+            
             self.video_atual = path 
             
+            # Reset flag de repetição única se for troca manual/automática
             if not keep_repeat:
                 self.repeat_one_done = False
 
+        # Vincula ao Canvas (Visual)
         self.player.set_hwnd(self.canvas.winfo_id())
-        self.player.set_media(self.vlc.media_new(path))
+        self.player.set_media(self.vlc_video.media_new(path))
+        
+        # Restaura volume original se estiver voltando de um anúncio
+        if resume:
+            self.player.audio_set_volume(self.saved_volume)
+        
         self.player.play()
         
         if start_paused:
@@ -278,21 +482,23 @@ class VisioDeckPlayer(ctk.CTk):
             self.btn_play.configure(text="⏸")
         
         if ad: 
-            self.modo_ad=True
+            self.modo_ad = True
             self.controls.place_forget()
             self.btn_settings.place_forget()
             self.opt_playlist.place_forget()
             self.configure(cursor="none")
             self.last_ad_timestamp = time.time()
         else: 
-            self.modo_ad=False
-            self.modo_tts=False # Reset TTS se for vídeo normal
+            self.modo_ad = False
+            self.modo_tts = False 
+            
             if resume:
                 self.configure(cursor="none")
                 self.controls.place_forget()
             else:
                 self.show_controls()
 
+    # --- CONTROLES DE TEMPO ---
     def skip_time(self, seconds):
         if not self.is_playing: return
         curr = self.player.get_time()
@@ -305,7 +511,9 @@ class VisioDeckPlayer(ctk.CTk):
         self.player.set_time(int(new_time))
         self.slider.set(self.player.get_position() * 1000)
 
+    # --- CONTROLES DE REPETIÇÃO ---
     def toggle_repeat(self):
+        # Ciclo: 0 (Off) -> 1 (Infinito) -> 2 (Uma Vez) -> 0
         self.repeat_state = (self.repeat_state + 1) % 3
         self.update_repeat_icon()
 
@@ -320,6 +528,7 @@ class VisioDeckPlayer(ctk.CTk):
             self.btn_rep.configure(text="🔂", text_color=VERITAS_BLUE) 
             ToolTip(self.btn_rep, "Repetir Vídeo: 1 VEZ")
 
+    # --- CONTROLE ALEATÓRIO ---
     def toggle_shuffle(self): 
         self.shuffle = not self.shuffle
         if self.shuffle:
@@ -329,6 +538,7 @@ class VisioDeckPlayer(ctk.CTk):
             self.btn_shuf.configure(text_color="#777")
             ToolTip(self.btn_shuf, "Aleatório: DESLIGADO")
 
+    # --- NAVEGAÇÃO ---
     def next(self):
         if not self.current_playlist: return
         if self.shuffle:
@@ -370,11 +580,11 @@ class VisioDeckPlayer(ctk.CTk):
             self.sl_vol.set(0)
             self.btn_mute.configure(text="🔇")
     
-    # --- LOOPS ---
+    # --- LOOP DE SISTEMA (CORE) ---
     def sys_loop(self):
         hoje = datetime.now().strftime("%d/%m/%Y")
         
-        # Reset diário
+        # Reset Diário
         if hoje != self.data_cache:
             self.data_cache = hoje
             try:
@@ -385,8 +595,8 @@ class VisioDeckPlayer(ctk.CTk):
         
         agora_ts = time.time()
         
-        # Checagem de Anúncios (Comerciais)
-        # Só checa se não estiver rolando anúncio E não estiver rolando locutor
+        # --- VERIFICAÇÃO DE ANÚNCIOS DE VÍDEO ---
+        # Só verifica se não estiver rodando comercial ou locutor
         if not self.modo_ad and not self.modo_tts and (agora_ts - self.last_ad_timestamp) > 60:
             if os.path.exists(DB_FILE):
                 now = datetime.now()
@@ -398,7 +608,7 @@ class VisioDeckPlayer(ctk.CTk):
                     for c in cons:
                         if not c.get("ativo") or not c.get("inicio"): continue
                         
-                        # Verifica Datas
+                        # Validação de Data
                         if c.get("modo") == "DATAS ESPECÍFICAS":
                             if hoje not in c.get("datas_especificas", []): continue
                         else:
@@ -412,13 +622,14 @@ class VisioDeckPlayer(ctk.CTk):
                             if not c.get("somente_hoje") and wd not in c.get("dias", []): continue
                             if c.get("somente_hoje") and c["inicio"] != hoje: continue
                         
-                        # Verifica Horário
+                        # Validação de Hora e Execução
                         if hora in c["horarios"]:
                             if self.is_playing:
                                 if hora not in c.get("execucoes_hoje", []):
                                     if "execucoes_hoje" not in c: c["execucoes_hoje"] = []
                                     c["execucoes_hoje"].append(hora)
                                     sv = True
+                                    
                                     self.mem_time = self.player.get_time()
                                     self.play_video(c["video"], ad=True)
                                     break
@@ -426,43 +637,59 @@ class VisioDeckPlayer(ctk.CTk):
                         with open(DB_FILE,'w') as f: json.dump(cons,f,indent=4)
                 except: pass
 
-        # Checagem de Fim de Vídeo / Áudio
-        if self.is_playing:
+        # --- VERIFICAÇÃO DE FIM DE MÍDIA ---
+        
+        # CASO 1: FIM DO LOCUTOR (TTS)
+        if self.modo_tts:
+            st = self.tts_player.get_state()
+            if st == vlc.State.Ended or st == vlc.State.Error:
+                self.modo_tts = False
+                
+                # SOLTA O PAUSE DA ACADEMIA (Retorna música externa)
+                try: 
+                    pyautogui.press("playpause") 
+                except: pass
+                
+                # Volta o vídeo
+                self.play_video(self.video_atual, resume=True)
+                self.after(500, lambda: self.player.set_time(self.mem_time))
+        
+        # CASO 2: FIM DO VÍDEO (TREINO OU AD)
+        elif self.is_playing:
             st = self.player.get_state()
             if st == vlc.State.Ended or st == vlc.State.Error:
+                
+                # Se acabou um anúncio de vídeo
                 if self.modo_ad:
-                    # Acabou o Comercial -> Volta treino
                     self.modo_ad = False
                     self.play_video(self.video_atual, resume=True)
                     self.after(500, lambda: self.player.set_time(self.mem_time))
                 
-                elif self.modo_tts:
-                    # Acabou o Locutor -> Volta treino
-                    self.modo_tts = False
-                    self.play_video(self.video_atual, resume=True)
-                    self.after(500, lambda: self.player.set_time(self.mem_time))
-                
+                # Se acabou um vídeo de treino
                 else:
-                    # Vídeo de Treino Normal Acabou
-                    if self.repeat_state == 1: # Infinito
+                    if self.repeat_state == 1: 
+                        # Loop Infinito
                         self.play_video(self.idx_video, keep_repeat=True)
                     
-                    elif self.repeat_state == 2: # Repetir 1x
+                    elif self.repeat_state == 2: 
+                        # Loop 1x
                         if not self.repeat_one_done:
                             self.play_video(self.idx_video, keep_repeat=True)
                             self.repeat_one_done = True
                         else:
-                            # Reseta o botão para cinza
+                            # Reset e Próximo
                             self.repeat_state = 0
                             self.update_repeat_icon()
                             self.next()
                     else:
+                        # Normal
                         self.next()
                         
         self.after(1000, self.sys_loop)
 
+    # --- LOOP DE UI ---
     def ui_loop(self):
-        if self.is_playing:
+        if self.is_playing and not self.modo_tts:
             try:
                 c = self.player.get_time()
                 t = self.player.get_length()
@@ -472,6 +699,7 @@ class VisioDeckPlayer(ctk.CTk):
             except: pass
         self.after(500, self.ui_loop)
 
+    # --- GESTÃO DE MOUSE ---
     def check_mouse_polling(self):
         if not self.modo_ad and not self.modo_tts:
             try:

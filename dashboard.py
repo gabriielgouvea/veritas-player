@@ -1,4 +1,4 @@
-# dashboard.py (Versão 15.0 - Final Fix)
+# dashboard.py (Versão 19.0 - Final Mixagem: Alerta Suave & Voz Potente)
 import customtkinter as ctk
 import os
 import time
@@ -6,15 +6,15 @@ import json
 import threading
 import asyncio
 import edge_tts 
-import subprocess # Necessário para chamar o ffmpeg
+import subprocess 
 from datetime import datetime
 from tkinter import filedialog
 from config import *
-from utils import ModernPopUp, carregar_db, salvar_db
+from utils import ModernPopUp, carregar_db, salvar_db, garantir_alerta_sonoro
 from downloader import YoutubeDownloader
 
 MSG_FILE = "mensagens_locutor.json"
-CONFIG_LOCUTOR = "config_locutor.json" # Salva a preferência do som
+CONFIG_LOCUTOR = "config_locutor.json"
 
 class DashboardWindow(ctk.CTkToplevel):
     def __init__(self, parent, player):
@@ -59,7 +59,7 @@ class DashboardWindow(ctk.CTkToplevel):
                       fg_color="#FFF", text_color=VERITAS_BLUE, hover_color="#F0F2F5", 
                       font=("Segoe UI", 14, "bold"), height=50, anchor="w").pack(fill="x", padx=10)
 
-        ctk.CTkLabel(self.sidebar, text="v15.0 - Stable", text_color="#AAA", font=("Segoe UI", 10, "bold")).pack(side="bottom", pady=(0, 10))
+        ctk.CTkLabel(self.sidebar, text="v19.0 - Mix Pro", text_color="#AAA", font=("Segoe UI", 10, "bold")).pack(side="bottom", pady=(0, 10))
         ctk.CTkLabel(self.sidebar, text="Desenvolvido por Gabriel Gouvêa", text_color="#CCC", font=("Segoe UI", 9)).pack(side="bottom", pady=5)
 
         self.main_area = ctk.CTkFrame(self, fg_color="transparent")
@@ -96,34 +96,42 @@ class DashboardWindow(ctk.CTkToplevel):
         left = ctk.CTkFrame(self.main_area, fg_color="white", corner_radius=10)
         left.pack(side="left", fill="both", expand=True, padx=(0,10), pady=10)
         
-        # Configuração de Som
+        # Som
         fr_sound = ctk.CTkFrame(left, fg_color="#F5F7FA")
         fr_sound.pack(fill="x", padx=20, pady=(20,5))
-        
-        self.lbl_sound = ctk.CTkLabel(fr_sound, text=f"🎵 Alerta: {os.path.basename(self.alert_sound_path) if self.alert_sound_path else 'Nenhum'}", text_color="#555", font=("Segoe UI", 12))
+        self.lbl_sound = ctk.CTkLabel(fr_sound, text=f"🎵 Alerta: {os.path.basename(self.alert_sound_path) if self.alert_sound_path else 'Padrão'}", text_color="#555", font=("Segoe UI", 12))
         self.lbl_sound.pack(side="left", padx=10, pady=5)
-        
         ctk.CTkButton(fr_sound, text="🔔 Escolher Som", width=100, height=30, fg_color="#DDD", text_color="#333", hover_color="#CCC", command=self.selecionar_som_alerta).pack(side="right", padx=5, pady=5)
 
         ctk.CTkLabel(left, text="📢 Digite sua mensagem:", font=("Segoe UI", 14, "bold"), text_color="#333").pack(anchor="w", padx=20, pady=(10,5))
         self.txt_tts = ctk.CTkTextbox(left, height=150, font=("Segoe UI", 16), border_width=1, border_color="#DDD")
         self.txt_tts.pack(fill="x", padx=20, pady=5)
         
-        ctk.CTkLabel(left, text="ℹ️ O anúncio tocará o alerta e repetirá a frase 2 vezes.", font=("Segoe UI", 12), text_color="#777").pack(anchor="w", padx=20)
+        # Controles
+        ctrl_area = ctk.CTkFrame(left, fg_color="transparent")
+        ctrl_area.pack(fill="x", padx=20, pady=10)
+        
+        ctk.CTkLabel(ctrl_area, text="Volume (%):", font=("Segoe UI", 12, "bold"), text_color="#555").pack(side="left", padx=(0,5))
+        self.e_vol = ctk.CTkEntry(ctrl_area, width=50, font=("Segoe UI", 12))
+        self.e_vol.pack(side="left")
+        self.e_vol.insert(0, "80") 
+        
+        self.btn_falar = ctk.CTkButton(ctrl_area, text="🔊 ANUNCIAR AGORA", height=50, fg_color=VERITAS_BLUE, font=("Segoe UI", 14, "bold"), command=self.falar_texto)
+        self.btn_falar.pack(side="right", fill="x", expand=True, padx=(10,0))
+        
+        # Barra de Progresso
+        self.progress_tts = ctk.CTkProgressBar(left, height=10, progress_color="#00C853")
+        self.progress_tts.set(0)
+        self.progress_tts.pack(fill="x", padx=20, pady=(0, 5))
+        self.lbl_prog_tts = ctk.CTkLabel(left, text="Pronto para anunciar", font=("Segoe UI", 11), text_color="#777")
+        self.lbl_prog_tts.pack(pady=(0, 10))
 
-        btn_area = ctk.CTkFrame(left, fg_color="transparent")
-        btn_area.pack(fill="x", padx=20, pady=10)
-        
-        self.btn_falar = ctk.CTkButton(btn_area, text="🔊 ANUNCIAR AGORA", height=50, fg_color=VERITAS_BLUE, font=("Segoe UI", 14, "bold"), command=self.falar_texto)
-        self.btn_falar.pack(side="right")
-        
-        ctk.CTkButton(btn_area, text="💾 Salvar Frase", height=50, fg_color="#EEE", text_color="#333", hover_color="#DDD", command=self.salvar_frase).pack(side="left")
+        ctk.CTkButton(left, text="💾 Salvar Frase", height=40, fg_color="#EEE", text_color="#333", hover_color="#DDD", command=self.salvar_frase).pack(fill="x", padx=20, pady=5)
 
         right = ctk.CTkFrame(self.main_area, fg_color="white", corner_radius=10)
         right.pack(side="right", fill="both", expand=True, padx=(10,0), pady=10)
         
         ctk.CTkLabel(right, text="📋 Mensagens Salvas", font=("Segoe UI", 14, "bold"), text_color="#333").pack(anchor="w", padx=20, pady=(20,10))
-        
         self.scroll_msgs = ctk.CTkScrollableFrame(right, fg_color="transparent")
         self.scroll_msgs.pack(fill="both", expand=True, padx=10, pady=(0,20))
         self.atualizar_lista_msgs()
@@ -163,10 +171,8 @@ class DashboardWindow(ctk.CTkToplevel):
         for i, txt in enumerate(self.msgs_prontas):
             f = ctk.CTkFrame(self.scroll_msgs, fg_color="#F9F9F9", corner_radius=5)
             f.pack(fill="x", pady=5)
-            
             lbl = ctk.CTkLabel(f, text=txt[:40] + ("..." if len(txt)>40 else ""), text_color="#555", anchor="w", font=("Segoe UI", 12))
             lbl.pack(side="left", padx=10, pady=10, fill="x", expand=True)
-            
             ctk.CTkButton(f, text="▶", width=40, fg_color="#E3F2FD", text_color=VERITAS_BLUE, hover_color="#BBDEFB", command=lambda t=txt: self.falar_direto(t)).pack(side="right", padx=5)
             ctk.CTkButton(f, text="✏️", width=40, fg_color="transparent", text_color="#555", hover_color="#EEE", command=lambda t=txt: self.carregar_input(t)).pack(side="right")
             ctk.CTkButton(f, text="🗑", width=40, fg_color="transparent", text_color="red", hover_color="#FFEBEE", command=lambda x=i: self.deletar_msg(x)).pack(side="right")
@@ -189,44 +195,58 @@ class DashboardWindow(ctk.CTkToplevel):
         txt = self.txt_tts.get("1.0", "end").strip()
         if not txt: return
         
-        self.btn_falar.configure(state="disabled", text="GERANDO E MIXANDO...")
-        threading.Thread(target=self.thread_gerar_audio, args=(txt,), daemon=True).start()
+        try: vol = int(self.e_vol.get())
+        except: vol = 80
+        
+        self.btn_falar.configure(state="disabled", text="GERANDO...")
+        self.progress_tts.set(0)
+        self.lbl_prog_tts.configure(text="Processando áudio...")
+        threading.Thread(target=self.thread_gerar_audio, args=(txt, vol), daemon=True).start()
 
-    def thread_gerar_audio(self, texto):
+    def thread_gerar_audio(self, texto, volume):
         try:
             temp_voz = "temp_voz.mp3"
             arquivo_final = "anuncio_completo.mp3"
             
+            # Busca FFmpeg
+            if os.path.exists("ffmpeg.exe"): ffmpeg_exe = os.path.abspath("ffmpeg.exe")
+            else: ffmpeg_exe = "ffmpeg"
+
+            # Alerta
+            path_alerta = self.alert_sound_path if self.alert_sound_path and os.path.exists(self.alert_sound_path) else garantir_alerta_sonoro()
+            
             # Voz Feminina
             VOZ = "pt-BR-FranciscaNeural" 
-            
-            # 1. Gera a voz da IA
             async def _gen():
                 comm = edge_tts.Communicate(texto, VOZ)
                 await comm.save(temp_voz)
             asyncio.run(_gen())
             
-            # 2. Mixagem com FFMPEG
+            # --- MIXAGEM CORRIGIDA ---
             inputs = []
             filter_complex = ""
             idx = 0
             
-            if self.alert_sound_path and os.path.exists(self.alert_sound_path):
-                inputs.extend(["-i", self.alert_sound_path])
-                filter_complex += f"[{idx}:a]"
+            # 1. Alerta (Volume 30% - Mais baixo)
+            if path_alerta:
+                inputs.extend(["-i", path_alerta])
+                filter_complex += f"[{idx}:a]aformat=sample_rates=44100:channel_layouts=stereo,volume=0.3[alert];"
                 idx += 1
             
+            # 2. Voz (Volume 300% - Mais alto)
             inputs.extend(["-i", temp_voz])
-            filter_complex += f"[{idx}:a]"
+            filter_complex += f"[{idx}:a]aformat=sample_rates=44100:channel_layouts=stereo,volume=3.0[voice];"
             idx += 1
             
-            inputs.extend(["-i", temp_voz])
-            filter_complex += f"[{idx}:a]"
-            idx += 1
+            # 3. Concatenação: Alerta -> Voz -> Voz
+            if path_alerta:
+                # Alerta + Voz + Voz
+                filter_complex += f"[alert][voice][voice]concat=n=3:v=0:a=1[out]"
+            else:
+                # Voz + Voz (Sem alerta)
+                filter_complex += f"[voice][voice]concat=n=2:v=0:a=1[out]"
             
-            filter_complex += f"concat=n={idx}:v=0:a=1[out]"
-            
-            cmd = ["ffmpeg", "-y"] + inputs + ["-filter_complex", filter_complex, "-map", "[out]", arquivo_final]
+            cmd = [ffmpeg_exe, "-y"] + inputs + ["-filter_complex", filter_complex, "-map", "[out]", arquivo_final]
             
             startupinfo = None
             if os.name == 'nt':
@@ -235,17 +255,39 @@ class DashboardWindow(ctk.CTkToplevel):
                 
             subprocess.run(cmd, check=True, startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
 
-            # 3. Toca
-            self.player.after(0, lambda: self.player.tocar_anuncio(os.path.abspath(arquivo_final)))
-            self.after(0, self.reset_btn_falar)
-            
+            # Duração
+            try:
+                dur_cmd = [ffmpeg_exe, "-i", arquivo_final, "-show_entries", "format=duration", "-v", "quiet", "-of", "csv=p=0"]
+                dur_res = subprocess.run(dur_cmd, capture_output=True, text=True, startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
+                duration = float(dur_res.stdout.strip())
+            except: duration = 5.0
+
+            self.after(0, lambda: self.iniciar_playback_com_progresso(arquivo_final, volume, duration))
             try: os.remove(temp_voz)
             except: pass
             
         except Exception as e:
-            print(f"Erro TTS/FFMPEG: {e}")
-            self.after(0, lambda: ModernPopUp(self, "Erro", f"Falha ao gerar áudio. Verifique se o ffmpeg está na pasta.\nErro: {str(e)}"))
+            print(f"Erro TTS: {e}")
+            self.after(0, lambda: ModernPopUp(self, "Erro", f"Falha ao gerar áudio.\n{str(e)}"))
             self.after(0, self.reset_btn_falar)
+
+    def iniciar_playback_com_progresso(self, arquivo, volume, duration):
+        self.player.tocar_anuncio(os.path.abspath(arquivo), volume)
+        self.start_time = time.time()
+        self.duration = duration
+        self.update_progress()
+
+    def update_progress(self):
+        elapsed = time.time() - self.start_time
+        if elapsed < self.duration:
+            val = elapsed / self.duration
+            self.progress_tts.set(val)
+            self.lbl_prog_tts.configure(text=f"Tocando: {int(elapsed)}s / {int(self.duration)}s")
+            self.after(100, self.update_progress)
+        else:
+            self.progress_tts.set(1.0)
+            self.lbl_prog_tts.configure(text="Concluído")
+            self.reset_btn_falar()
 
     def reset_btn_falar(self):
         self.btn_falar.configure(state="normal", text="🔊 ANUNCIAR AGORA")
@@ -258,8 +300,8 @@ class DashboardWindow(ctk.CTkToplevel):
         ctk.CTkLabel(card, text="☕", font=("Arial", 60)).pack(pady=(40,10))
         ctk.CTkLabel(card, text="Gostou do Veritas Player?", font=("Segoe UI", 24, "bold"), text_color=VERITAS_BLUE).pack(pady=5)
         msg = ("Este software é desenvolvido por uma única pessoa (Gabriel Gouvêa). "
-               "Se eu ajudo o seu negócio, considere fazer uma doação de qualquer valor. "
-               "Isso ajuda a pagar o café e motiva novas atualizações!")
+               "Se ele ajuda o seu negócio ou academia, considere fazer uma doação de qualquer valor. "
+               "Isso ajuda a pagar o café e motiva novas atualizações com recursos como o Locutor AI!")
         ctk.CTkLabel(card, text=msg, font=("Segoe UI", 14), text_color="#555", wraplength=500, justify="center").pack(pady=20)
         box = ctk.CTkFrame(card, fg_color="#F5F7FA", corner_radius=10)
         box.pack(pady=20, padx=50, fill="x")
