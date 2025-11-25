@@ -208,9 +208,13 @@ class DashboardWindow(ctk.CTkToplevel):
             temp_voz = "temp_voz.mp3"
             arquivo_final = "anuncio_completo.mp3"
             
-            # Busca FFmpeg
-            if os.path.exists("ffmpeg.exe"): ffmpeg_exe = os.path.abspath("ffmpeg.exe")
-            else: ffmpeg_exe = "ffmpeg"
+            # Usa o caminho inteligente do config.py
+            ffmpeg_exe = FFMPEG_PATH
+            
+            # Verificação de segurança
+            if not os.path.exists(ffmpeg_exe):
+                # Tenta fallback para o sistema caso não esteja na pasta
+                ffmpeg_exe = "ffmpeg"
 
             # Alerta
             path_alerta = self.alert_sound_path if self.alert_sound_path and os.path.exists(self.alert_sound_path) else garantir_alerta_sonoro()

@@ -6,17 +6,21 @@ import os
 import time
 import json
 import random
-import pyautogui 
+import pyautogui
+import sys 
 from datetime import datetime
 from config import *
 from utils import ToolTip, carregar_db, salvar_db
 from dashboard import DashboardWindow
 
-# --- FIX DE DLLs DO VLC NO WINDOWS ---
-# Garante que o Python encontre as DLLs do VLC na pasta local
+# Fix para carregar DLLs do VLC localmente ou congelado
 if os.name == 'nt':
     try:
-        os.add_dll_directory(os.getcwd())
+        # Se estiver congelado (EXE), as DLLs estão em sys._MEIPASS ou na pasta local
+        if hasattr(sys, '_MEIPASS'):
+            os.add_dll_directory(sys._MEIPASS)
+        else:
+            os.add_dll_directory(os.getcwd())
     except:
         pass
 

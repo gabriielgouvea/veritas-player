@@ -1,10 +1,34 @@
+# --- Ambiente Virtual e Cache (Padrão) ---
 venv/
 .venv/
 __pycache__/
 *.py[cod]
 .vscode/
+
+# --- PyInstaller (CRÍTICO: Ignora o EXE e arquivos de build) ---
+build/
+dist/
+*.spec
+
+# --- Arquivos Temporários do Locutor (Lixo) ---
+temp_*.mp3
+anuncio_completo.mp3
+ding.mp3
+
+# --- Arquivos de Configuração do Usuário (Para não vazar seus caminhos) ---
+last_paths.txt
+config_locutor.json
+
+# --- Banco de Dados Local (Opcional: Se quiser que o repo venha "limpo") ---
+# Se você deixar isso comentado (#), seus contratos sobem pro Git.
+# Se descomentar, cada pessoa começa com o banco zerado (Recomendado para público)
+contratos_midia.json
+mensagens_locutor.json
+
+# --- Mídias Pesadas ---
 media/
 *.mp4
 *.mkv
 *.avi
 *.mov
+Downloads_Youtube/
