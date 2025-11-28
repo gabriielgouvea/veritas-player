@@ -1,4 +1,4 @@
-# player.py (Versão 18.0 - FINAL COMPLETA - SEM CORTES)
+# player.py (Versão 19.1 - Stop Ready)
 import customtkinter as ctk
 import tkinter as tk
 import vlc
@@ -40,8 +40,7 @@ class VisioDeckPlayer(ctk.CTk):
         # --- CONFIGURAÇÃO DOS PLAYERS (DUAL INSTANCE) ---
         
         # PLAYER 1: VÍDEO DE TREINO
-        # Usa aceleração de hardware (avcodec-hw) e output padrão (WASAPI/DirectX)
-        # Isso garante performance máxima em vídeos 4K/1080p
+        # Usa aceleração de hardware (avcodec-hw=none para segurança)
         self.vlc_video = vlc.Instance(
             "--no-xlib", 
             "--input-repeat=0", 
@@ -51,8 +50,7 @@ class VisioDeckPlayer(ctk.CTk):
         self.player = self.vlc_video.media_player_new()
         
         # PLAYER 2: LOCUTOR / TTS
-        # Força saída via DirectSound para evitar conflito com o driver de vídeo (Erro 0x88890008)
-        # Isso permite tocar o áudio "por cima" ou enquanto o vídeo pausa
+        # Força saída via DirectSound para evitar conflito com WASAPI
         self.vlc_audio = vlc.Instance("--aout=directsound") 
         self.tts_player = self.vlc_audio.media_player_new()
         
@@ -392,6 +390,25 @@ class VisioDeckPlayer(ctk.CTk):
         # 6. Oculta Interface (Modo Broadcast)
         self.controls.place_forget()
         self.configure(cursor="none")
+
+    # NOVA FUNÇÃO: STOP TOTAL
+    def parar_tts(self):
+        # Para o player de voz imediatamente
+        if self.tts_player.is_playing():
+            self.tts_player.stop()
+        
+        self.modo_tts = False
+        self.configure(cursor="arrow")
+        
+        # Tenta soltar o Play/Pause da música externa imediatamente
+        try: 
+            pyautogui.press("playpause") 
+        except: pass
+
+        # Se tiver um vídeo pausado, retoma ele
+        if self.mem_time > 0:
+            self.play_video(self.video_atual, resume=True)
+            self.after(500, lambda: self.player.set_time(self.mem_time))
 
     # Troca de Playlist
     def change_playlist(self, name):

@@ -1,4 +1,4 @@
-# dashboard.py (Versão 19.0 - Final Mixagem: Alerta Suave & Voz Potente)
+# dashboard.py (Versão 19.3 - Fix Stop & Volume)
 import customtkinter as ctk
 import os
 import time
@@ -10,7 +10,7 @@ import subprocess
 from datetime import datetime
 from tkinter import filedialog
 from config import *
-from utils import ModernPopUp, carregar_db, salvar_db, garantir_alerta_sonoro
+from utils import ModernPopUp, carregar_db, salvar_db, garantir_alerta_sonoro, ControleVolume
 from downloader import YoutubeDownloader
 
 MSG_FILE = "mensagens_locutor.json"
@@ -36,6 +36,9 @@ class DashboardWindow(ctk.CTkToplevel):
         self.l_hours = []
         self.l_dates = []
         self.vid_path = ""
+        
+        self.volume_antes_tts = 50 
+        self.em_anuncio = False
 
         # --- SIDEBAR ---
         self.sidebar = ctk.CTkFrame(self, width=260, corner_radius=0, fg_color="white")
@@ -59,7 +62,7 @@ class DashboardWindow(ctk.CTkToplevel):
                       fg_color="#FFF", text_color=VERITAS_BLUE, hover_color="#F0F2F5", 
                       font=("Segoe UI", 14, "bold"), height=50, anchor="w").pack(fill="x", padx=10)
 
-        ctk.CTkLabel(self.sidebar, text="v19.0 - Mix Pro", text_color="#AAA", font=("Segoe UI", 10, "bold")).pack(side="bottom", pady=(0, 10))
+        ctk.CTkLabel(self.sidebar, text="v19.3 - Fix Stop", text_color="#AAA", font=("Segoe UI", 10, "bold")).pack(side="bottom", pady=(0, 10))
         ctk.CTkLabel(self.sidebar, text="Desenvolvido por Gabriel Gouvêa", text_color="#CCC", font=("Segoe UI", 9)).pack(side="bottom", pady=5)
 
         self.main_area = ctk.CTkFrame(self, fg_color="transparent")
@@ -96,7 +99,6 @@ class DashboardWindow(ctk.CTkToplevel):
         left = ctk.CTkFrame(self.main_area, fg_color="white", corner_radius=10)
         left.pack(side="left", fill="both", expand=True, padx=(0,10), pady=10)
         
-        # Som
         fr_sound = ctk.CTkFrame(left, fg_color="#F5F7FA")
         fr_sound.pack(fill="x", padx=20, pady=(20,5))
         self.lbl_sound = ctk.CTkLabel(fr_sound, text=f"🎵 Alerta: {os.path.basename(self.alert_sound_path) if self.alert_sound_path else 'Padrão'}", text_color="#555", font=("Segoe UI", 12))
@@ -107,19 +109,20 @@ class DashboardWindow(ctk.CTkToplevel):
         self.txt_tts = ctk.CTkTextbox(left, height=150, font=("Segoe UI", 16), border_width=1, border_color="#DDD")
         self.txt_tts.pack(fill="x", padx=20, pady=5)
         
-        # Controles
         ctrl_area = ctk.CTkFrame(left, fg_color="transparent")
         ctrl_area.pack(fill="x", padx=20, pady=10)
         
-        ctk.CTkLabel(ctrl_area, text="Volume (%):", font=("Segoe UI", 12, "bold"), text_color="#555").pack(side="left", padx=(0,5))
+        ctk.CTkLabel(ctrl_area, text="Volume PC (%):", font=("Segoe UI", 12, "bold"), text_color="#555").pack(side="left", padx=(0,5))
         self.e_vol = ctk.CTkEntry(ctrl_area, width=50, font=("Segoe UI", 12))
         self.e_vol.pack(side="left")
         self.e_vol.insert(0, "80") 
         
         self.btn_falar = ctk.CTkButton(ctrl_area, text="🔊 ANUNCIAR AGORA", height=50, fg_color=VERITAS_BLUE, font=("Segoe UI", 14, "bold"), command=self.falar_texto)
-        self.btn_falar.pack(side="right", fill="x", expand=True, padx=(10,0))
+        self.btn_falar.pack(side="left", fill="x", expand=True, padx=(10,5))
+
+        self.btn_stop = ctk.CTkButton(ctrl_area, text="⏹ PARAR", height=50, width=80, fg_color=VERITAS_DANGER, font=("Segoe UI", 12, "bold"), state="disabled", command=self.parar_fala)
+        self.btn_stop.pack(side="right")
         
-        # Barra de Progresso
         self.progress_tts = ctk.CTkProgressBar(left, height=10, progress_color="#00C853")
         self.progress_tts.set(0)
         self.progress_tts.pack(fill="x", padx=20, pady=(0, 5))
@@ -195,60 +198,59 @@ class DashboardWindow(ctk.CTkToplevel):
         txt = self.txt_tts.get("1.0", "end").strip()
         if not txt: return
         
-        try: vol = int(self.e_vol.get())
-        except: vol = 80
-        
+        # ATUALIZA UI PRIMEIRO (Para garantir que o Stop funcione)
         self.btn_falar.configure(state="disabled", text="GERANDO...")
+        self.btn_stop.configure(state="normal")
         self.progress_tts.set(0)
         self.lbl_prog_tts.configure(text="Processando áudio...")
-        threading.Thread(target=self.thread_gerar_audio, args=(txt, vol), daemon=True).start()
+        
+        # Só depois tenta pegar o volume (que pode falhar se não tiver pycaw/comtypes)
+        try:
+            self.volume_antes_tts = ControleVolume.get_volume()
+        except:
+            self.volume_antes_tts = 50
+        
+        try: vol_alvo = int(self.e_vol.get())
+        except: vol_alvo = 80
+        
+        threading.Thread(target=self.thread_gerar_audio, args=(txt, vol_alvo), daemon=True).start()
 
-    def thread_gerar_audio(self, texto, volume):
+    def thread_gerar_audio(self, texto, volume_windows):
         try:
             temp_voz = "temp_voz.mp3"
             arquivo_final = "anuncio_completo.mp3"
             
-            # Usa o caminho inteligente do config.py
             ffmpeg_exe = FFMPEG_PATH
-            
-            # Verificação de segurança
             if not os.path.exists(ffmpeg_exe):
-                # Tenta fallback para o sistema caso não esteja na pasta
                 ffmpeg_exe = "ffmpeg"
 
-            # Alerta
             path_alerta = self.alert_sound_path if self.alert_sound_path and os.path.exists(self.alert_sound_path) else garantir_alerta_sonoro()
             
-            # Voz Feminina
             VOZ = "pt-BR-FranciscaNeural" 
             async def _gen():
                 comm = edge_tts.Communicate(texto, VOZ)
                 await comm.save(temp_voz)
             asyncio.run(_gen())
             
-            # --- MIXAGEM CORRIGIDA ---
             inputs = []
             filter_complex = ""
             idx = 0
             
-            # 1. Alerta (Volume 30% - Mais baixo)
             if path_alerta:
                 inputs.extend(["-i", path_alerta])
                 filter_complex += f"[{idx}:a]aformat=sample_rates=44100:channel_layouts=stereo,volume=0.3[alert];"
                 idx += 1
             
-            # 2. Voz (Volume 300% - Mais alto)
             inputs.extend(["-i", temp_voz])
-            filter_complex += f"[{idx}:a]aformat=sample_rates=44100:channel_layouts=stereo,volume=3.0[voice];"
+            filter_complex += f"[{idx}:a]aformat=sample_rates=44100:channel_layouts=stereo,volume=3.0[raw_voice];"
             idx += 1
             
-            # 3. Concatenação: Alerta -> Voz -> Voz
+            filter_complex += "[raw_voice]asplit=2[v1][v2];"
+
             if path_alerta:
-                # Alerta + Voz + Voz
-                filter_complex += f"[alert][voice][voice]concat=n=3:v=0:a=1[out]"
+                filter_complex += f"[alert][v1][v2]concat=n=3:v=0:a=1[out]"
             else:
-                # Voz + Voz (Sem alerta)
-                filter_complex += f"[voice][voice]concat=n=2:v=0:a=1[out]"
+                filter_complex += f"[v1][v2]concat=n=2:v=0:a=1[out]"
             
             cmd = [ffmpeg_exe, "-y"] + inputs + ["-filter_complex", filter_complex, "-map", "[out]", arquivo_final]
             
@@ -259,14 +261,13 @@ class DashboardWindow(ctk.CTkToplevel):
                 
             subprocess.run(cmd, check=True, startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
 
-            # Duração
             try:
                 dur_cmd = [ffmpeg_exe, "-i", arquivo_final, "-show_entries", "format=duration", "-v", "quiet", "-of", "csv=p=0"]
                 dur_res = subprocess.run(dur_cmd, capture_output=True, text=True, startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
                 duration = float(dur_res.stdout.strip())
             except: duration = 5.0
 
-            self.after(0, lambda: self.iniciar_playback_com_progresso(arquivo_final, volume, duration))
+            self.after(0, lambda: self.iniciar_playback_com_progresso(arquivo_final, volume_windows, duration))
             try: os.remove(temp_voz)
             except: pass
             
@@ -275,13 +276,17 @@ class DashboardWindow(ctk.CTkToplevel):
             self.after(0, lambda: ModernPopUp(self, "Erro", f"Falha ao gerar áudio.\n{str(e)}"))
             self.after(0, self.reset_btn_falar)
 
-    def iniciar_playback_com_progresso(self, arquivo, volume, duration):
-        self.player.tocar_anuncio(os.path.abspath(arquivo), volume)
+    def iniciar_playback_com_progresso(self, arquivo, volume_windows, duration):
+        ControleVolume.set_volume(volume_windows)
+        self.player.tocar_anuncio(os.path.abspath(arquivo), 100)
         self.start_time = time.time()
         self.duration = duration
+        self.em_anuncio = True
         self.update_progress()
 
     def update_progress(self):
+        if not self.em_anuncio: return
+
         elapsed = time.time() - self.start_time
         if elapsed < self.duration:
             val = elapsed / self.duration
@@ -291,10 +296,21 @@ class DashboardWindow(ctk.CTkToplevel):
         else:
             self.progress_tts.set(1.0)
             self.lbl_prog_tts.configure(text="Concluído")
-            self.reset_btn_falar()
+            self.finalizar_anuncio()
 
-    def reset_btn_falar(self):
+    def parar_fala(self):
+        if self.em_anuncio:
+            self.em_anuncio = False
+            self.player.parar_tts()
+            self.lbl_prog_tts.configure(text="Interrompido pelo usuário")
+            self.progress_tts.set(0)
+            self.finalizar_anuncio()
+
+    def finalizar_anuncio(self):
+        ControleVolume.set_volume(self.volume_antes_tts)
+        self.em_anuncio = False
         self.btn_falar.configure(state="normal", text="🔊 ANUNCIAR AGORA")
+        self.btn_stop.configure(state="disabled")
 
     # --- DOAÇÃO ---
     def render_donate(self):
