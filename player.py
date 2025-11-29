@@ -1,4 +1,4 @@
-# player.py (Versão 19.1 - Stop Ready)
+# player.py (Versão 19.4 - COMPLETA - Rádio Indoor & Video Ads)
 import customtkinter as ctk
 import tkinter as tk
 import vlc
@@ -40,7 +40,7 @@ class VisioDeckPlayer(ctk.CTk):
         # --- CONFIGURAÇÃO DOS PLAYERS (DUAL INSTANCE) ---
         
         # PLAYER 1: VÍDEO DE TREINO
-        # Usa aceleração de hardware (avcodec-hw=none para segurança)
+        # Usa aceleração de hardware (avcodec-hw=none para segurança máxima)
         self.vlc_video = vlc.Instance(
             "--no-xlib", 
             "--input-repeat=0", 
@@ -49,8 +49,8 @@ class VisioDeckPlayer(ctk.CTk):
         )
         self.player = self.vlc_video.media_player_new()
         
-        # PLAYER 2: LOCUTOR / TTS
-        # Força saída via DirectSound para evitar conflito com WASAPI
+        # PLAYER 2: LOCUTOR / TTS / AUDIO ADS
+        # Força saída via DirectSound para evitar conflito com o driver de vídeo
         self.vlc_audio = vlc.Instance("--aout=directsound") 
         self.tts_player = self.vlc_audio.media_player_new()
         
@@ -71,10 +71,10 @@ class VisioDeckPlayer(ctk.CTk):
         
         # Flags de Interrupção
         self.modo_ad = False       # True quando está passando vídeo comercial
-        self.modo_tts = False      # True quando o locutor está falando
+        self.modo_tts = False      # True quando o locutor ou audio ad está tocando
         
         # Memória de Reprodução
-        self.mem_time = 0          # Guarda o tempo exato onde o vídeo parou
+        self.mem_time = 0          # Guarda o tempo exato onde o vídeo parou (ou 0 se for audio ad)
         self.video_atual = ""      # Guarda o caminho do vídeo atual
         self.saved_volume = 100    # Guarda o volume do vídeo antes do anúncio
         
@@ -349,19 +349,48 @@ class VisioDeckPlayer(ctk.CTk):
     def open_dash(self):
         DashboardWindow(self, self)
     
-    # --- FUNÇÃO CRÍTICA: LOCUTOR / TTS ---
-    # Gerencia a pausa externa, pausa interna e volume boost
+    # --- MÉTODOS DE ÁUDIO (RÁDIO INDOOR) ---
+    def tocar_audio_background(self, arquivo_audio):
+        """ Toca um áudio sem parar o vídeo, apenas baixando o volume (Ducking) """
+        if not os.path.exists(arquivo_audio): return
+        
+        # 1. Modo DJ Externo (Opcional, se a academia usa Spotify)
+        try: pyautogui.press("playpause")
+        except: pass
+        
+        # Pequeno delay para garantir
+        time.sleep(0.5)
+
+        # 2. Ducking (Abaixa o volume do vídeo para 10%)
+        try:
+            self.saved_volume = self.player.audio_get_volume()
+            if self.saved_volume == -1: self.saved_volume = 100
+        except: self.saved_volume = 100
+        
+        self.player.audio_set_volume(10) # Fundo musical baixo
+        
+        # 3. Toca o anúncio no canal TTS (que é DirectSound e sobrepõe)
+        self.modo_tts = True # Usamos a flag TTS pois o comportamento de 'fim' é similar
+        self.mem_time = 0 # Sinaliza que NÃO é para despausar vídeo, apenas restaurar volume
+        
+        self.tts_player.set_media(self.vlc_audio.media_new(arquivo_audio))
+        self.tts_player.audio_set_volume(100) # Volume máximo no player interno
+        self.tts_player.play()
+        
+        # Oculta controles
+        self.controls.place_forget()
+        self.configure(cursor="none")
+
     def tocar_anuncio(self, arquivo_audio, volume_alvo=100):
+        """ Toca um áudio PAUSANDO o vídeo (Modo Locutor ou Comercial de Vídeo) """
         if not os.path.exists(arquivo_audio): return
 
         # 1. Controle Externo (DJ Mode)
-        # Tenta pausar o Spotify/Chrome apertando a tecla Media Play/Pause
         try: 
             pyautogui.press("playpause")
         except: 
             print("Erro ao controlar mídia externa")
             
-        # Delay para o som baixar
         time.sleep(0.5) 
 
         # 2. Controle Interno (Vídeo)
@@ -370,8 +399,7 @@ class VisioDeckPlayer(ctk.CTk):
             self.player.pause()
             self.mem_time = self.player.get_time()
         
-        # 3. Gestão de Volume Inteligente
-        # Salva o volume atual do vídeo para restaurar depois
+        # 3. Gestão de Volume
         try:
             self.saved_volume = self.player.audio_get_volume()
             if self.saved_volume == -1: self.saved_volume = 100
@@ -380,18 +408,18 @@ class VisioDeckPlayer(ctk.CTk):
 
         # 4. Configura Estado do Locutor
         self.modo_tts = True
-        self.btn_play.configure(text="⏸") # Mostra ícone de pause
+        self.btn_play.configure(text="⏸")
         
-        # 5. Toca o Anúncio no Player Dedicado
+        # 5. Toca o Anúncio
         self.tts_player.set_media(self.vlc_audio.media_new(arquivo_audio))
-        self.tts_player.audio_set_volume(int(volume_alvo)) # Aplica o boost
+        self.tts_player.audio_set_volume(int(volume_alvo))
         self.tts_player.play()
         
-        # 6. Oculta Interface (Modo Broadcast)
+        # 6. Oculta Interface
         self.controls.place_forget()
         self.configure(cursor="none")
 
-    # NOVA FUNÇÃO: STOP TOTAL
+    # FUNÇÃO DE STOP TOTAL
     def parar_tts(self):
         # Para o player de voz imediatamente
         if self.tts_player.is_playing():
@@ -405,10 +433,14 @@ class VisioDeckPlayer(ctk.CTk):
             pyautogui.press("playpause") 
         except: pass
 
-        # Se tiver um vídeo pausado, retoma ele
+        # Lógica de Retorno
         if self.mem_time > 0:
+            # Se era um vídeo pausado, retoma
             self.play_video(self.video_atual, resume=True)
             self.after(500, lambda: self.player.set_time(self.mem_time))
+        else:
+            # Se era Audio Background, apenas restaura o volume
+            self.player.audio_set_volume(self.saved_volume)
 
     # Troca de Playlist
     def change_playlist(self, name):
@@ -480,15 +512,12 @@ class VisioDeckPlayer(ctk.CTk):
             
             self.video_atual = path 
             
-            # Reset flag de repetição única se for troca manual/automática
             if not keep_repeat:
                 self.repeat_one_done = False
 
-        # Vincula ao Canvas (Visual)
         self.player.set_hwnd(self.canvas.winfo_id())
         self.player.set_media(self.vlc_video.media_new(path))
         
-        # Restaura volume original se estiver voltando de um anúncio
         if resume:
             self.player.audio_set_volume(self.saved_volume)
         
@@ -534,7 +563,6 @@ class VisioDeckPlayer(ctk.CTk):
 
     # --- CONTROLES DE REPETIÇÃO ---
     def toggle_repeat(self):
-        # Ciclo: 0 (Off) -> 1 (Infinito) -> 2 (Uma Vez) -> 0
         self.repeat_state = (self.repeat_state + 1) % 3
         self.update_repeat_icon()
 
@@ -601,7 +629,7 @@ class VisioDeckPlayer(ctk.CTk):
             self.sl_vol.set(0)
             self.btn_mute.configure(text="🔇")
     
-    # --- LOOP DE SISTEMA (CORE) ---
+    # --- LOOP DE SISTEMA (CORE) - ATUALIZADO PARA AUDIO ADS ---
     def sys_loop(self):
         hoje = datetime.now().strftime("%d/%m/%Y")
         
@@ -616,7 +644,7 @@ class VisioDeckPlayer(ctk.CTk):
         
         agora_ts = time.time()
         
-        # --- VERIFICAÇÃO DE ANÚNCIOS DE VÍDEO ---
+        # --- VERIFICAÇÃO DE ANÚNCIOS ---
         # Só verifica se não estiver rodando comercial ou locutor
         if not self.modo_ad and not self.modo_tts and (agora_ts - self.last_ad_timestamp) > 60:
             if os.path.exists(DB_FILE):
@@ -651,8 +679,20 @@ class VisioDeckPlayer(ctk.CTk):
                                     c["execucoes_hoje"].append(hora)
                                     sv = True
                                     
-                                    self.mem_time = self.player.get_time()
-                                    self.play_video(c["video"], ad=True)
+                                    # --- DETECÇÃO DO TIPO DE MÍDIA ---
+                                    tipo = c.get("tipo", "VIDEO")
+                                    
+                                    if tipo == "AUDIO":
+                                        # MODO RÁDIO INDOOR:
+                                        # 1. Não pausa o vídeo
+                                        # 2. Baixa o volume do vídeo (Ducking)
+                                        # 3. Toca o áudio no canal TTS
+                                        self.tocar_audio_background(c["video"]) # c["video"] guarda o caminho do arquivo
+                                    else:
+                                        # MODO CLÁSSICO (VÍDEO)
+                                        self.mem_time = self.player.get_time()
+                                        self.play_video(c["video"], ad=True)
+                                    
                                     break
                     if sv: 
                         with open(DB_FILE,'w') as f: json.dump(cons,f,indent=4)
@@ -660,22 +700,26 @@ class VisioDeckPlayer(ctk.CTk):
 
         # --- VERIFICAÇÃO DE FIM DE MÍDIA ---
         
-        # CASO 1: FIM DO LOCUTOR (TTS)
+        # CASO 1: FIM DO LOCUTOR/AUDIO AD
         if self.modo_tts:
             st = self.tts_player.get_state()
             if st == vlc.State.Ended or st == vlc.State.Error:
                 self.modo_tts = False
                 
-                # SOLTA O PAUSE DA ACADEMIA (Retorna música externa)
-                try: 
-                    pyautogui.press("playpause") 
+                # Restaura música externa (Se estiver pausada)
+                try: pyautogui.press("playpause") 
                 except: pass
                 
-                # Volta o vídeo
-                self.play_video(self.video_atual, resume=True)
-                self.after(500, lambda: self.player.set_time(self.mem_time))
+                # Se for vídeo pausado (Modo Locutor/Comercial Video), restaura
+                if self.mem_time > 0:
+                    self.play_video(self.video_atual, resume=True)
+                    self.after(500, lambda: self.player.set_time(self.mem_time))
+                
+                # Se for Áudio Background (Modo Rádio), apenas restaura o volume
+                else:
+                    self.player.audio_set_volume(self.saved_volume)
         
-        # CASO 2: FIM DO VÍDEO (TREINO OU AD)
+        # CASO 2: FIM DO VÍDEO PRINCIPAL
         elif self.is_playing:
             st = self.player.get_state()
             if st == vlc.State.Ended or st == vlc.State.Error:
