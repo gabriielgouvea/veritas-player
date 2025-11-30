@@ -1,4 +1,4 @@
-# dashboard.py (Versão 19.4 - Suporte a Audio Ads)
+# dashboard.py (Versão 19.13 - Sync via Player Polling)
 import customtkinter as ctk
 import os
 import time
@@ -7,6 +7,7 @@ import threading
 import asyncio
 import edge_tts 
 import subprocess 
+import sys
 from datetime import datetime
 from tkinter import filedialog
 from config import *
@@ -15,6 +16,10 @@ from downloader import YoutubeDownloader
 
 MSG_FILE = "mensagens_locutor.json"
 CONFIG_LOCUTOR = "config_locutor.json"
+
+def log(msg):
+    print(f"[DEBUG] {msg}")
+    sys.stdout.flush()
 
 class DashboardWindow(ctk.CTkToplevel):
     def __init__(self, parent, player):
@@ -37,9 +42,6 @@ class DashboardWindow(ctk.CTkToplevel):
         self.l_dates = []
         self.vid_path = ""
         
-        self.volume_antes_tts = 50 
-        self.em_anuncio = False
-
         # --- SIDEBAR ---
         self.sidebar = ctk.CTkFrame(self, width=260, corner_radius=0, fg_color="white")
         self.sidebar.grid(row=0, column=0, sticky="nsew")
@@ -62,7 +64,7 @@ class DashboardWindow(ctk.CTkToplevel):
                       fg_color="#FFF", text_color=VERITAS_BLUE, hover_color="#F0F2F5", 
                       font=("Segoe UI", 14, "bold"), height=50, anchor="w").pack(fill="x", padx=10)
 
-        ctk.CTkLabel(self.sidebar, text="v19.4 - Audio Ads", text_color="#AAA", font=("Segoe UI", 10, "bold")).pack(side="bottom", pady=(0, 10))
+        ctk.CTkLabel(self.sidebar, text="v19.13 - Realtime", text_color="#AAA", font=("Segoe UI", 10, "bold")).pack(side="bottom", pady=(0, 10))
         ctk.CTkLabel(self.sidebar, text="Desenvolvido por Gabriel Gouvêa", text_color="#CCC", font=("Segoe UI", 9)).pack(side="bottom", pady=5)
 
         self.main_area = ctk.CTkFrame(self, fg_color="transparent")
@@ -92,7 +94,218 @@ class DashboardWindow(ctk.CTkToplevel):
             container.pack(fill="both", expand=True)
             YoutubeDownloader(container, self.player.pasta_treino).pack(fill="both", expand=True)
 
-    # --- RENDER AD CREATE (ATUALIZADO COM SELETOR DE MÍDIA) ---
+    # --- LOCUTOR ---
+    def render_locutor(self):
+        self.header("Locutor Virtual (IA)", "Digite uma mensagem ou selecione uma pronta.")
+        left = ctk.CTkFrame(self.main_area, fg_color="white", corner_radius=10)
+        left.pack(side="left", fill="both", expand=True, padx=(0,10), pady=10)
+        
+        fr_sound = ctk.CTkFrame(left, fg_color="#F5F7FA")
+        fr_sound.pack(fill="x", padx=20, pady=(20,5))
+        self.lbl_sound = ctk.CTkLabel(fr_sound, text=f"🎵 Alerta: {os.path.basename(self.alert_sound_path) if self.alert_sound_path else 'Padrão'}", text_color="#555", font=("Segoe UI", 12))
+        self.lbl_sound.pack(side="left", padx=10, pady=5)
+        ctk.CTkButton(fr_sound, text="🔔 Escolher Som", width=100, height=30, fg_color="#DDD", text_color="#333", hover_color="#CCC", command=self.selecionar_som_alerta).pack(side="right", padx=5, pady=5)
+
+        ctk.CTkLabel(left, text="📢 Digite sua mensagem:", font=("Segoe UI", 14, "bold"), text_color="#333").pack(anchor="w", padx=20, pady=(10,5))
+        self.txt_tts = ctk.CTkTextbox(left, height=150, font=("Segoe UI", 16), border_width=1, border_color="#DDD")
+        self.txt_tts.pack(fill="x", padx=20, pady=5)
+        
+        ctrl_area = ctk.CTkFrame(left, fg_color="transparent")
+        ctrl_area.pack(fill="x", padx=20, pady=10)
+        
+        ctk.CTkLabel(ctrl_area, text="Volume PC (%):", font=("Segoe UI", 12, "bold"), text_color="#555").pack(side="left", padx=(0,5))
+        self.e_vol = ctk.CTkEntry(ctrl_area, width=50, font=("Segoe UI", 12))
+        self.e_vol.pack(side="left")
+        self.e_vol.insert(0, "60") 
+        
+        self.btn_falar = ctk.CTkButton(ctrl_area, text="🔊 ANUNCIAR AGORA", height=50, fg_color=VERITAS_BLUE, font=("Segoe UI", 14, "bold"), command=self.falar_texto)
+        self.btn_falar.pack(side="left", fill="x", expand=True, padx=(10,5))
+
+        self.btn_stop = ctk.CTkButton(ctrl_area, text="⏹ PARAR", height=50, width=80, fg_color=VERITAS_DANGER, font=("Segoe UI", 12, "bold"), state="disabled", command=self.parar_fala)
+        self.btn_stop.pack(side="right")
+        
+        self.progress_tts = ctk.CTkProgressBar(left, height=10, progress_color="#00C853")
+        self.progress_tts.set(0)
+        self.progress_tts.pack(fill="x", padx=20, pady=(0, 5))
+        self.lbl_prog_tts = ctk.CTkLabel(left, text="Pronto para anunciar", font=("Segoe UI", 11), text_color="#777")
+        self.lbl_prog_tts.pack(pady=(0, 10))
+
+        ctk.CTkButton(left, text="💾 Salvar Frase", height=40, fg_color="#EEE", text_color="#333", hover_color="#DDD", command=self.salvar_frase).pack(fill="x", padx=20, pady=5)
+
+        right = ctk.CTkFrame(self.main_area, fg_color="white", corner_radius=10)
+        right.pack(side="right", fill="both", expand=True, padx=(10,0), pady=10)
+        
+        ctk.CTkLabel(right, text="📋 Mensagens Salvas", font=("Segoe UI", 14, "bold"), text_color="#333").pack(anchor="w", padx=20, pady=(20,10))
+        self.scroll_msgs = ctk.CTkScrollableFrame(right, fg_color="transparent")
+        self.scroll_msgs.pack(fill="both", expand=True, padx=10, pady=(0,20))
+        self.atualizar_lista_msgs()
+
+    def carregar_msgs(self):
+        if os.path.exists(MSG_FILE):
+            try: return json.load(open(MSG_FILE, 'r'))
+            except: pass
+        return []
+    
+    def carregar_config_locutor(self):
+        if os.path.exists(CONFIG_LOCUTOR):
+            try: 
+                d = json.load(open(CONFIG_LOCUTOR, 'r'))
+                return d.get("alert_sound", "")
+            except: pass
+        return ""
+
+    def selecionar_som_alerta(self):
+        p = filedialog.askopenfilename(parent=self, title="Selecione o som de alerta", filetypes=[("Audio", "*.mp3 *.wav")])
+        if p:
+            self.alert_sound_path = p
+            self.lbl_sound.configure(text=f"🎵 Alerta: {os.path.basename(p)}")
+            with open(CONFIG_LOCUTOR, 'w') as f:
+                json.dump({"alert_sound": p}, f)
+
+    def salvar_frase(self):
+        txt = self.txt_tts.get("1.0", "end").strip()
+        if not txt: return
+        self.msgs_prontas.append(txt)
+        with open(MSG_FILE, 'w') as f: json.dump(self.msgs_prontas, f)
+        self.atualizar_lista_msgs()
+        self.txt_tts.delete("1.0", "end")
+
+    def atualizar_lista_msgs(self):
+        for w in self.scroll_msgs.winfo_children(): w.destroy()
+        for i, txt in enumerate(self.msgs_prontas):
+            f = ctk.CTkFrame(self.scroll_msgs, fg_color="#F9F9F9", corner_radius=5)
+            f.pack(fill="x", pady=5)
+            lbl = ctk.CTkLabel(f, text=txt[:40] + ("..." if len(txt)>40 else ""), text_color="#555", anchor="w", font=("Segoe UI", 12))
+            lbl.pack(side="left", padx=10, pady=10, fill="x", expand=True)
+            ctk.CTkButton(f, text="Ouvir", width=60, fg_color="#E3F2FD", text_color=VERITAS_BLUE, hover_color="#BBDEFB", font=("Segoe UI", 11, "bold"), command=lambda t=txt: self.falar_direto(t)).pack(side="right", padx=2)
+            ctk.CTkButton(f, text="Editar", width=60, fg_color="#FFF3E0", text_color="#E65100", hover_color="#FFE0B2", font=("Segoe UI", 11, "bold"), command=lambda t=txt: self.carregar_input(t)).pack(side="right", padx=2)
+            ctk.CTkButton(f, text="Excluir", width=60, fg_color="#FFEBEE", text_color=VERITAS_DANGER, hover_color="#FFCDD2", font=("Segoe UI", 11, "bold"), command=lambda x=i: self.deletar_msg(x)).pack(side="right", padx=2)
+
+    def carregar_input(self, txt):
+        self.txt_tts.delete("1.0", "end")
+        self.txt_tts.insert("1.0", txt)
+
+    def deletar_msg(self, idx):
+        del self.msgs_prontas[idx]
+        with open(MSG_FILE, 'w') as f: json.dump(self.msgs_prontas, f)
+        self.atualizar_lista_msgs()
+
+    def falar_direto(self, txt):
+        self.txt_tts.delete("1.0", "end")
+        self.txt_tts.insert("1.0", txt)
+        self.falar_texto()
+
+    def falar_texto(self):
+        log("Botão Anunciar Clicado")
+        txt = self.txt_tts.get("1.0", "end").strip()
+        if not txt: return
+        
+        self.btn_falar.configure(state="disabled", text="GERANDO...")
+        self.btn_stop.configure(state="normal")
+        self.progress_tts.set(0)
+        self.lbl_prog_tts.configure(text="Processando áudio...")
+        
+        try: vol_alvo = int(self.e_vol.get())
+        except: vol_alvo = 80
+        
+        threading.Thread(target=self.thread_gerar_audio, args=(txt, vol_alvo), daemon=True).start()
+
+    def thread_gerar_audio(self, texto, volume_windows):
+        log("Thread Iniciada")
+        try:
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+            except: pass
+
+            temp_voz = "temp_voz.mp3"
+            arquivo_final = "anuncio_completo.mp3"
+            
+            ffmpeg_exe = FFMPEG_PATH
+            if not os.path.exists(ffmpeg_exe): ffmpeg_exe = "ffmpeg"
+
+            path_alerta = self.alert_sound_path if self.alert_sound_path and os.path.exists(self.alert_sound_path) else garantir_alerta_sonoro()
+            
+            log("Gerando TTS...")
+            VOZ = "pt-BR-FranciscaNeural" 
+            async def _gen():
+                comm = edge_tts.Communicate(texto, VOZ)
+                await comm.save(temp_voz)
+            asyncio.run(_gen())
+            
+            inputs = []
+            filter_complex = ""
+            idx = 0
+            if path_alerta:
+                inputs.extend(["-i", path_alerta])
+                filter_complex += f"[{idx}:a]aformat=sample_rates=44100:channel_layouts=stereo,volume=0.3[alert];"
+                idx += 1
+            inputs.extend(["-i", temp_voz])
+            filter_complex += f"[{idx}:a]aformat=sample_rates=44100:channel_layouts=stereo,volume=3.0[raw_voice];"
+            idx += 1
+            filter_complex += "[raw_voice]asplit=2[v1][v2];"
+            if path_alerta: filter_complex += f"[alert][v1][v2]concat=n=3:v=0:a=1[out]"
+            else: filter_complex += f"[v1][v2]concat=n=2:v=0:a=1[out]"
+            
+            cmd = [ffmpeg_exe, "-y"] + inputs + ["-filter_complex", filter_complex, "-map", "[out]", arquivo_final]
+            
+            log("FFmpeg Start")
+            startupinfo = None
+            if os.name == 'nt':
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            subprocess.run(cmd, check=True, startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
+            log("FFmpeg End")
+            
+            time.sleep(1.0) 
+
+            # AQUI ESTÁ A MUDANÇA CRUCIAL:
+            # Em vez de tentar calcular a duração, chamamos o play e monitoramos
+            self.after(0, lambda: self.iniciar_playback_monitorado(arquivo_final, volume_windows))
+            
+            try: os.remove(temp_voz)
+            except: pass
+            
+        except Exception as e:
+            log(f"ERRO: {e}")
+            self.after(0, self.reset_btn_falar)
+
+    def iniciar_playback_monitorado(self, arquivo, volume_windows):
+        log("Mandando Player Tocar")
+        # Player toca e ajusta volume
+        self.player.tocar_anuncio(os.path.abspath(arquivo), volume_windows)
+        
+        # Dashboard entra em loop de monitoramento
+        self.after(200, self.monitorar_tts_realtime)
+
+    def monitorar_tts_realtime(self):
+        # Pergunta ao Player como estamos
+        playing, time_ms, length_ms = self.player.get_tts_status()
+        
+        if playing:
+            if length_ms > 0:
+                prog = time_ms / length_ms
+                self.progress_tts.set(prog)
+                self.lbl_prog_tts.configure(text=f"Tocando: {int(time_ms/1000)}s / {int(length_ms/1000)}s")
+            
+            # Continua monitorando
+            self.after(100, self.monitorar_tts_realtime)
+        else:
+            # Player parou (Acabou ou Stop)
+            self.progress_tts.set(1.0 if length_ms > 0 else 0)
+            self.lbl_prog_tts.configure(text="Concluído")
+            self.reset_btn_falar()
+
+    def parar_fala(self):
+        log("Parar Clicado")
+        self.player.parar_tts() # Player resolve tudo
+        # O loop monitorar_tts_realtime vai perceber que parou e resetar a UI
+
+    def reset_btn_falar(self):
+        self.btn_falar.configure(state="normal", text="🔊 ANUNCIAR AGORA")
+        self.btn_stop.configure(state="disabled")
+
+    # (RESTO DO CÓDIGO PERMANECE IGUAL: render_ad_create, render_donate, etc...)
     def render_ad_create(self):
         d = {}
         if self.editando_id:
@@ -105,12 +318,10 @@ class DashboardWindow(ctk.CTkToplevel):
         fr = ctk.CTkFrame(self.last_card, fg_color="transparent")
         fr.pack(fill="x", padx=20, pady=10)
         
-        # --- SELETOR DE TIPO ---
         ctk.CTkLabel(fr, text="Tipo de Mídia:", text_color="#555").grid(row=0, column=0, sticky="w", padx=(0,10), pady=(0,5))
         self.var_tipo = ctk.StringVar(value=d.get("tipo", "VIDEO"))
         self.seg_tipo = ctk.CTkSegmentedButton(fr, values=["VIDEO", "AUDIO"], variable=self.var_tipo, command=self.mudar_tipo_midia, selected_color=VERITAS_BLUE, selected_hover_color=VERITAS_BLUE_HOVER)
         self.seg_tipo.grid(row=1, column=0, sticky="ew", padx=(0,10))
-        # -----------------------
 
         self.inp_grid(fr, "Nome:", 0, 1)
         self.e_nome = ctk.CTkEntry(fr, height=40)
@@ -205,7 +416,7 @@ class DashboardWindow(ctk.CTkToplevel):
         
         self.smart_date()
         if self.editando_id and d: self.preencher(d)
-        self.mudar_tipo_midia() # Atualiza labels ao abrir
+        self.mudar_tipo_midia()
 
     def mudar_tipo_midia(self, v=None):
         t = self.var_tipo.get()
@@ -230,7 +441,7 @@ class DashboardWindow(ctk.CTkToplevel):
         c = { 
             "id": self.editando_id if self.editando_id else int(time.time()), 
             "nome": self.e_nome.get() or "Sem Nome", 
-            "tipo": self.var_tipo.get(), # SALVA O TIPO
+            "tipo": self.var_tipo.get(),
             "autorizado": self.e_autor.get(), 
             "video": self.vid_path, 
             "ativo": True, 
@@ -262,7 +473,7 @@ class DashboardWindow(ctk.CTkToplevel):
         self.e_nome.delete(0, "end")
         self.e_nome.insert(0, d.get("nome",""))
         self.e_autor.set(d.get("autorizado",""))
-        self.var_tipo.set(d.get("tipo", "VIDEO")) # Carrega o tipo
+        self.var_tipo.set(d.get("tipo", "VIDEO"))
         self.vid_path = d.get("video","")
         if self.vid_path: self.lbl_vid.configure(text=os.path.basename(self.vid_path))
         self.l_hours = d.get("horarios",[])[:]
@@ -347,7 +558,7 @@ class DashboardWindow(ctk.CTkToplevel):
     
     def card_form(self, p, t): 
         self.last_card = ctk.CTkFrame(p, fg_color="white", corner_radius=10)
-        self.last_card.pack(fill="x", pady=10)
+        self.last_card.pack(fill="x", padx=5, pady=10)
         ctk.CTkLabel(self.last_card, text=t, font=("Segoe UI", 14, "bold"), text_color=VERITAS_BLUE).pack(anchor="w", padx=20, pady=(15,5))
         ctk.CTkFrame(self.last_card, height=1, fg_color="#EEE").pack(fill="x", padx=20, pady=(0,10))
     
@@ -388,203 +599,6 @@ class DashboardWindow(ctk.CTkToplevel):
             f.pack(side="left", padx=5, pady=5)
             ctk.CTkLabel(f, text=v, text_color=VERITAS_BLUE).pack(side="left", padx=5)
             ctk.CTkButton(f, text="x", width=15, fg_color="transparent", text_color="red", command=lambda x=v: cb(x)).pack(side="left")
-
-    # --- RESTANTE DAS FUNÇÕES (LOCUTOR, DONATE, CONFIG, ETC) ---
-    # (Elas permanecem inalteradas, mas como você pediu arquivo completo, vou manter as principais)
-    # ... (Omitindo para economizar espaço e evitar duplicação desnecessária já que o foco é o Ad Create,
-    # MAS como você pediu COMPLETO, vou colar o bloco do Locutor aqui também para garantir)
-
-    def render_locutor(self):
-        self.header("Locutor Virtual (IA)", "Digite uma mensagem ou selecione uma pronta.")
-        left = ctk.CTkFrame(self.main_area, fg_color="white", corner_radius=10)
-        left.pack(side="left", fill="both", expand=True, padx=(0,10), pady=10)
-        
-        fr_sound = ctk.CTkFrame(left, fg_color="#F5F7FA")
-        fr_sound.pack(fill="x", padx=20, pady=(20,5))
-        self.lbl_sound = ctk.CTkLabel(fr_sound, text=f"🎵 Alerta: {os.path.basename(self.alert_sound_path) if self.alert_sound_path else 'Padrão'}", text_color="#555", font=("Segoe UI", 12))
-        self.lbl_sound.pack(side="left", padx=10, pady=5)
-        ctk.CTkButton(fr_sound, text="🔔 Escolher Som", width=100, height=30, fg_color="#DDD", text_color="#333", hover_color="#CCC", command=self.selecionar_som_alerta).pack(side="right", padx=5, pady=5)
-
-        ctk.CTkLabel(left, text="📢 Digite sua mensagem:", font=("Segoe UI", 14, "bold"), text_color="#333").pack(anchor="w", padx=20, pady=(10,5))
-        self.txt_tts = ctk.CTkTextbox(left, height=150, font=("Segoe UI", 16), border_width=1, border_color="#DDD")
-        self.txt_tts.pack(fill="x", padx=20, pady=5)
-        
-        ctrl_area = ctk.CTkFrame(left, fg_color="transparent")
-        ctrl_area.pack(fill="x", padx=20, pady=10)
-        
-        ctk.CTkLabel(ctrl_area, text="Volume PC (%):", font=("Segoe UI", 12, "bold"), text_color="#555").pack(side="left", padx=(0,5))
-        self.e_vol = ctk.CTkEntry(ctrl_area, width=50, font=("Segoe UI", 12))
-        self.e_vol.pack(side="left")
-        self.e_vol.insert(0, "80") 
-        
-        self.btn_falar = ctk.CTkButton(ctrl_area, text="🔊 ANUNCIAR AGORA", height=50, fg_color=VERITAS_BLUE, font=("Segoe UI", 14, "bold"), command=self.falar_texto)
-        self.btn_falar.pack(side="left", fill="x", expand=True, padx=(10,5))
-
-        self.btn_stop = ctk.CTkButton(ctrl_area, text="⏹ PARAR", height=50, width=80, fg_color=VERITAS_DANGER, font=("Segoe UI", 12, "bold"), state="disabled", command=self.parar_fala)
-        self.btn_stop.pack(side="right")
-        
-        self.progress_tts = ctk.CTkProgressBar(left, height=10, progress_color="#00C853")
-        self.progress_tts.set(0)
-        self.progress_tts.pack(fill="x", padx=20, pady=(0, 5))
-        self.lbl_prog_tts = ctk.CTkLabel(left, text="Pronto para anunciar", font=("Segoe UI", 11), text_color="#777")
-        self.lbl_prog_tts.pack(pady=(0, 10))
-
-        ctk.CTkButton(left, text="💾 Salvar Frase", height=40, fg_color="#EEE", text_color="#333", hover_color="#DDD", command=self.salvar_frase).pack(fill="x", padx=20, pady=5)
-
-        right = ctk.CTkFrame(self.main_area, fg_color="white", corner_radius=10)
-        right.pack(side="right", fill="both", expand=True, padx=(10,0), pady=10)
-        
-        ctk.CTkLabel(right, text="📋 Mensagens Salvas", font=("Segoe UI", 14, "bold"), text_color="#333").pack(anchor="w", padx=20, pady=(20,10))
-        self.scroll_msgs = ctk.CTkScrollableFrame(right, fg_color="transparent")
-        self.scroll_msgs.pack(fill="both", expand=True, padx=10, pady=(0,20))
-        self.atualizar_lista_msgs()
-
-    def carregar_msgs(self):
-        if os.path.exists(MSG_FILE):
-            try: return json.load(open(MSG_FILE, 'r'))
-            except: pass
-        return []
-    
-    def carregar_config_locutor(self):
-        if os.path.exists(CONFIG_LOCUTOR):
-            try: 
-                d = json.load(open(CONFIG_LOCUTOR, 'r'))
-                return d.get("alert_sound", "")
-            except: pass
-        return ""
-
-    def selecionar_som_alerta(self):
-        p = filedialog.askopenfilename(parent=self, title="Selecione o som de alerta", filetypes=[("Audio", "*.mp3 *.wav")])
-        if p:
-            self.alert_sound_path = p
-            self.lbl_sound.configure(text=f"🎵 Alerta: {os.path.basename(p)}")
-            with open(CONFIG_LOCUTOR, 'w') as f:
-                json.dump({"alert_sound": p}, f)
-
-    def salvar_frase(self):
-        txt = self.txt_tts.get("1.0", "end").strip()
-        if not txt: return
-        self.msgs_prontas.append(txt)
-        with open(MSG_FILE, 'w') as f: json.dump(self.msgs_prontas, f)
-        self.atualizar_lista_msgs()
-        self.txt_tts.delete("1.0", "end")
-
-    def atualizar_lista_msgs(self):
-        for w in self.scroll_msgs.winfo_children(): w.destroy()
-        for i, txt in enumerate(self.msgs_prontas):
-            f = ctk.CTkFrame(self.scroll_msgs, fg_color="#F9F9F9", corner_radius=5)
-            f.pack(fill="x", pady=5)
-            lbl = ctk.CTkLabel(f, text=txt[:40] + ("..." if len(txt)>40 else ""), text_color="#555", anchor="w", font=("Segoe UI", 12))
-            lbl.pack(side="left", padx=10, pady=10, fill="x", expand=True)
-            ctk.CTkButton(f, text="▶", width=40, fg_color="#E3F2FD", text_color=VERITAS_BLUE, hover_color="#BBDEFB", command=lambda t=txt: self.falar_direto(t)).pack(side="right", padx=5)
-            ctk.CTkButton(f, text="✏️", width=40, fg_color="transparent", text_color="#555", hover_color="#EEE", command=lambda t=txt: self.carregar_input(t)).pack(side="right")
-            ctk.CTkButton(f, text="🗑", width=40, fg_color="transparent", text_color="red", hover_color="#FFEBEE", command=lambda x=i: self.deletar_msg(x)).pack(side="right")
-
-    def carregar_input(self, txt):
-        self.txt_tts.delete("1.0", "end")
-        self.txt_tts.insert("1.0", txt)
-
-    def deletar_msg(self, idx):
-        del self.msgs_prontas[idx]
-        with open(MSG_FILE, 'w') as f: json.dump(self.msgs_prontas, f)
-        self.atualizar_lista_msgs()
-
-    def falar_direto(self, txt):
-        self.txt_tts.delete("1.0", "end")
-        self.txt_tts.insert("1.0", txt)
-        self.falar_texto()
-
-    def falar_texto(self):
-        txt = self.txt_tts.get("1.0", "end").strip()
-        if not txt: return
-        self.btn_falar.configure(state="disabled", text="GERANDO...")
-        self.btn_stop.configure(state="normal")
-        self.progress_tts.set(0)
-        self.lbl_prog_tts.configure(text="Processando áudio...")
-        try: self.volume_antes_tts = ControleVolume.get_volume()
-        except: self.volume_antes_tts = 50
-        try: vol_alvo = int(self.e_vol.get())
-        except: vol_alvo = 80
-        threading.Thread(target=self.thread_gerar_audio, args=(txt, vol_alvo), daemon=True).start()
-
-    def thread_gerar_audio(self, texto, volume_windows):
-        try:
-            temp_voz = "temp_voz.mp3"
-            arquivo_final = "anuncio_completo.mp3"
-            ffmpeg_exe = FFMPEG_PATH
-            if not os.path.exists(ffmpeg_exe): ffmpeg_exe = "ffmpeg"
-            path_alerta = self.alert_sound_path if self.alert_sound_path and os.path.exists(self.alert_sound_path) else garantir_alerta_sonoro()
-            VOZ = "pt-BR-FranciscaNeural" 
-            async def _gen():
-                comm = edge_tts.Communicate(texto, VOZ)
-                await comm.save(temp_voz)
-            asyncio.run(_gen())
-            inputs = []
-            filter_complex = ""
-            idx = 0
-            if path_alerta:
-                inputs.extend(["-i", path_alerta])
-                filter_complex += f"[{idx}:a]aformat=sample_rates=44100:channel_layouts=stereo,volume=0.3[alert];"
-                idx += 1
-            inputs.extend(["-i", temp_voz])
-            filter_complex += f"[{idx}:a]aformat=sample_rates=44100:channel_layouts=stereo,volume=3.0[raw_voice];"
-            idx += 1
-            filter_complex += "[raw_voice]asplit=2[v1][v2];"
-            if path_alerta: filter_complex += f"[alert][v1][v2]concat=n=3:v=0:a=1[out]"
-            else: filter_complex += f"[v1][v2]concat=n=2:v=0:a=1[out]"
-            cmd = [ffmpeg_exe, "-y"] + inputs + ["-filter_complex", filter_complex, "-map", "[out]", arquivo_final]
-            startupinfo = None
-            if os.name == 'nt':
-                startupinfo = subprocess.STARTUPINFO()
-                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            subprocess.run(cmd, check=True, startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
-            try:
-                dur_cmd = [ffmpeg_exe, "-i", arquivo_final, "-show_entries", "format=duration", "-v", "quiet", "-of", "csv=p=0"]
-                dur_res = subprocess.run(dur_cmd, capture_output=True, text=True, startupinfo=startupinfo, creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
-                duration = float(dur_res.stdout.strip())
-            except: duration = 5.0
-            self.after(0, lambda: self.iniciar_playback_com_progresso(arquivo_final, volume_windows, duration))
-            try: os.remove(temp_voz)
-            except: pass
-        except Exception as e:
-            print(f"Erro TTS: {e}")
-            self.after(0, lambda: ModernPopUp(self, "Erro", f"Falha ao gerar áudio.\n{str(e)}"))
-            self.after(0, self.reset_btn_falar)
-
-    def iniciar_playback_com_progresso(self, arquivo, volume_windows, duration):
-        ControleVolume.set_volume(volume_windows)
-        self.player.tocar_anuncio(os.path.abspath(arquivo), 100)
-        self.start_time = time.time()
-        self.duration = duration
-        self.em_anuncio = True
-        self.update_progress()
-
-    def update_progress(self):
-        if not self.em_anuncio: return
-        elapsed = time.time() - self.start_time
-        if elapsed < self.duration:
-            val = elapsed / self.duration
-            self.progress_tts.set(val)
-            self.lbl_prog_tts.configure(text=f"Tocando: {int(elapsed)}s / {int(self.duration)}s")
-            self.after(100, self.update_progress)
-        else:
-            self.progress_tts.set(1.0)
-            self.lbl_prog_tts.configure(text="Concluído")
-            self.finalizar_anuncio()
-
-    def parar_fala(self):
-        if self.em_anuncio:
-            self.em_anuncio = False
-            self.player.parar_tts()
-            self.lbl_prog_tts.configure(text="Interrompido pelo usuário")
-            self.progress_tts.set(0)
-            self.finalizar_anuncio()
-
-    def finalizar_anuncio(self):
-        ControleVolume.set_volume(self.volume_antes_tts)
-        self.em_anuncio = False
-        self.btn_falar.configure(state="normal", text="🔊 ANUNCIAR AGORA")
-        self.btn_stop.configure(state="disabled")
 
     def render_donate(self):
         self.header("Apoie o Projeto", "Ajude a manter o Veritas Player gratuito e atualizado.")
