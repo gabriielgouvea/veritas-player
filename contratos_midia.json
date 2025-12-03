@@ -1,18 +1,17 @@
 [
     {
-        "id": 1763756710,
-        "nome": "SAB\u00c3O YP\u00ca",
+        "id": 1764789765,
+        "nome": "TESTE",
+        "tipo": "VIDEO",
         "autorizado": "Basa",
-        "video": "E:/PROPAGANDA --------/Promo\u00e7\u00e3o Yp\u00ea 75 Anos no Mundo M\u00e1gico de OZ!.mp4",
+        "video": "C:/VisioDeck_System/media/Downloads_Youtube/Promo\u00e7\u00e3o Yp\u00ea 75 Anos no Mundo M\u00e1gico de OZ!.mp4",
         "ativo": true,
         "modo": "POR PER\u00cdODO",
         "horarios": [
-            "20:15",
-            "22:50",
-            "23:00"
+            "16:46"
         ],
-        "inicio": "21/11/2025",
-        "fim": "INDETERMINADO",
+        "inicio": "03/12/2025",
+        "fim": "03/12/2025",
         "dias": [
             "seg",
             "ter",
@@ -22,17 +21,13 @@
             "sab",
             "dom"
         ],
-        "somente_hoje": false,
+        "somente_hoje": true,
         "datas_especificas": [],
         "execucoes_hoje": [
-            "17:27",
-            "20:22",
-            "22:56",
-            "19:44",
-            "19:45",
-            "20:15",
-            "22:50",
-            "23:00"
+            "16:23",
+            "16:35",
+            "16:44",
+            "16:46"
         ]
     }
 ]

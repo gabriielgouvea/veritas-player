@@ -1,11 +1,11 @@
 import os
 import sys
-import ctypes # <--- Importante para forçar o carregamento
+import ctypes # Importante para forçar o carregamento das DLLs
 
 # --- VARIÁVEIS GLOBAIS ---
 PLUGIN_PATH = ""
 
-# --- FIX "NUCLEAR" PARA VLC ---
+# --- FIX "NUCLEAR" PARA VLC (Executa ANTES de importar o módulo vlc) ---
 if os.name == 'nt':
     try:
         # 1. Descobrir onde estamos (Path Real)
@@ -21,25 +21,30 @@ if os.name == 'nt':
         dll_core = os.path.join(app_dir, 'libvlccore.dll')
         PLUGIN_PATH = os.path.join(app_dir, "plugins")
 
-        # 3. DEBUG VISUAL (Isso vai salvar sua sanidade)
-        # Se a DLL não existir, avisa antes de quebrar
+        # 3. DEBUG VISUAL (Segurança: avisa se faltar arquivo)
         if not os.path.exists(dll_vlc):
-            ctypes.windll.user32.MessageBoxW(0, f"ARQUIVO SUMIU!\nNão achei: {dll_vlc}", "Erro Fatal", 0x10)
+            try:
+                ctypes.windll.user32.MessageBoxW(0, f"ARQUIVO SUMIU!\nNão achei: {dll_vlc}", "Erro Fatal", 0x10)
+            except:
+                print(f"ERRO CRÍTICO: DLL não encontrada em {dll_vlc}")
 
         # 4. Adicionar ao Path do Windows
         os.add_dll_directory(app_dir)
         
-        # 5. Configurar Variáveis de Ambiente
+        # 5. Configurar Variáveis de Ambiente (ISSO É O QUE FAZ FUNCIONAR)
         os.environ['PYTHON_VLC_MODULE_PATH'] = app_dir
         os.environ['VLC_PLUGIN_PATH'] = PLUGIN_PATH
 
-        # 6. CARREGAMENTO FORÇADO (O Pulo do Gato)
-        # Isso obriga o Windows a carregar a DLL na memória AGORA.
-        ctypes.CDLL(dll_core)
-        ctypes.CDLL(dll_vlc)
+        # 6. CARREGAMENTO FORÇADO
+        try:
+            ctypes.CDLL(dll_core)
+            ctypes.CDLL(dll_vlc)
+        except Exception as e:
+            # Aviso apenas informativo
+            pass
         
     except Exception as e:
-        ctypes.windll.user32.MessageBoxW(0, f"Erro ao carregar DLLs:\n{e}", "Erro VLC", 0x10)
+        print(f"Erro ao configurar ambiente VLC: {e}")
 
 # --- AGORA SIM IMPORTAMOS O RESTO ---
 import vlc 
@@ -51,31 +56,8 @@ import random
 import pyautogui
 from datetime import datetime
 from config import *
-from utils import ToolTip, carregar_db, salvar_db, ControleVolume
+from utils import ToolTip, carregar_db, salvar_db
 from dashboard import DashboardWindow
-
-class VisioDeckPlayer(ctk.CTk):
-    def __init__(self):
-        super().__init__()
-        
-        # ... (Configurações da Janela...) ...
-        self.title("Veritas Player")
-        self.configure(fg_color=VERITAS_PLAYER_BG)
-        self.geometry("1200x800")
-        self.after(100, lambda: self.state("zoomed"))
-        self.is_fullscreen = False
-
-        # --- CONFIGURAÇÃO DOS PLAYERS COM CAMINHO EXPLÍCITO ---
-        # Aqui passamos o caminho dos plugins "na marra" para garantir
-        param_plugins = f"--vlc-plugins-path={PLUGIN_PATH}" if PLUGIN_PATH else ""
-        
-        # PLAYER 1: VÍDEO
-        self.vlc_video = vlc.Instance(param_plugins, "--no-xlib", "--input-repeat=0", "--disable-screensaver", "--avcodec-hw=none")
-        self.player = self.vlc_video.media_player_new()
-        
-        # PLAYER 2: ÁUDIO/TTS
-        self.vlc_audio = vlc.Instance(param_plugins, "--aout=directsound") 
-        self.tts_player = self.vlc_audio.media_player_new()
 
 class VisioDeckPlayer(ctk.CTk):
     def __init__(self):
@@ -89,13 +71,24 @@ class VisioDeckPlayer(ctk.CTk):
         self.after(100, lambda: self.state("zoomed"))
         self.is_fullscreen = False
         
-        # --- CONFIGURAÇÃO DOS PLAYERS (DUAL INSTANCE) ---
-        # PLAYER 1: VÍDEO
-        self.vlc_video = vlc.Instance("--no-xlib", "--input-repeat=0", "--disable-screensaver", "--avcodec-hw=none")
+        # --- CONFIGURAÇÃO DOS PLAYERS ---
+        # CORREÇÃO: Removido "param_plugins" que causava erro,
+        # pois já configuramos via os.environ no início.
+        
+        # PLAYER 1: VÍDEO 
+        self.vlc_video = vlc.Instance(
+            "--no-xlib", 
+            "--input-repeat=0", 
+            "--disable-screensaver", 
+            "--avcodec-hw=none",
+            "--vout=direct3d9",
+            "--quiet",
+            "--verbose=-1"
+        )
         self.player = self.vlc_video.media_player_new()
         
         # PLAYER 2: ÁUDIO/TTS
-        self.vlc_audio = vlc.Instance("--aout=directsound") 
+        self.vlc_audio = vlc.Instance("--aout=directsound", "--quiet", "--verbose=-1") 
         self.tts_player = self.vlc_audio.media_player_new()
         
         # --- ESTADO ---
@@ -119,8 +112,6 @@ class VisioDeckPlayer(ctk.CTk):
         # Memória
         self.mem_time = 0          
         self.video_atual = ""      
-        self.saved_volume = 100    
-        self.windows_vol_cache = 50 
         
         self.hist_minuto = [] 
         self.data_cache = datetime.now().strftime("%d/%m/%Y")
@@ -220,35 +211,24 @@ class VisioDeckPlayer(ctk.CTk):
     def open_dash(self):
         DashboardWindow(self, self)
     
-    # --- MÉTODOS DE ÁUDIO COM SMART VOLUME (Radio Indoor) ---
+    # --- MÉTODOS DE ÁUDIO (TOTALMENTE MANUAL - ZERO AUTOMAÇÃO DE VOLUME) ---
     def tocar_audio_background(self, arquivo_audio):
-        """ Toca áudio sem parar vídeo, sobe volume do Windows """
+        """ Toca áudio sem parar vídeo, e SEM baixar volume do vídeo """
         if not os.path.exists(arquivo_audio): return
         
-        # 1. Captura e Sobe Volume Windows
-        try:
-            self.windows_vol_cache = ControleVolume.get_volume()
-            ControleVolume.set_volume(85) 
-        except: pass
-
-        # 2. Pausa som externo (Spotify)
+        # 1. Pausa som externo (Spotify) via Media Keys
         try: pyautogui.press("playpause")
         except: pass
         time.sleep(0.5)
 
-        # 3. Ducking (Abaixa vídeo interno)
-        try:
-            self.saved_volume = self.player.audio_get_volume()
-            if self.saved_volume == -1: self.saved_volume = 100
-        except: self.saved_volume = 100
-        self.player.audio_set_volume(10)
+        # REMOVIDO: Ducking (Não abaixa mais o volume do player de vídeo)
         
-        # 4. Toca Anúncio
+        # 2. Toca Anúncio
         self.modo_tts = True
         self.mem_time = 0 
         
         self.tts_player.set_media(self.vlc_audio.media_new(arquivo_audio))
-        self.tts_player.audio_set_volume(100)
+        self.tts_player.audio_set_volume(100) # Volume do Locutor sempre no máximo
         self.tts_player.play()
         
         self.controls.place_forget()
@@ -257,12 +237,9 @@ class VisioDeckPlayer(ctk.CTk):
     def tocar_anuncio(self, arquivo_audio, volume_alvo=100):
         """ Toca anúncio pausando vídeo (Modo Locutor) """
         if not os.path.exists(arquivo_audio): return
-
-        try:
-            self.windows_vol_cache = ControleVolume.get_volume()
-            ControleVolume.set_volume(int(volume_alvo))
-        except: pass
-
+        
+        # REMOVIDO: Lógica de volume_alvo do Windows
+        
         try: pyautogui.press("playpause")
         except: pass
         time.sleep(0.5) 
@@ -271,11 +248,6 @@ class VisioDeckPlayer(ctk.CTk):
             self.player.pause()
             self.mem_time = self.player.get_time()
         
-        try:
-            self.saved_volume = self.player.audio_get_volume()
-            if self.saved_volume == -1: self.saved_volume = 100
-        except: self.saved_volume = 100
-
         self.modo_tts = True
         self.btn_play.configure(text="⏸")
         
@@ -291,25 +263,21 @@ class VisioDeckPlayer(ctk.CTk):
         self._restaurar_estado_pos_tts()
 
     def _restaurar_estado_pos_tts(self):
-        # FUNÇÃO CRÍTICA: Restaura tudo ao normal
+        # Restaura estado interno do Player
         self.modo_tts = False
         self.configure(cursor="arrow")
         
-        # 1. Restaura Volume Windows
-        try: 
-            ControleVolume.set_volume(self.windows_vol_cache)
-        except: pass
+        # REMOVIDO: Restauração de Volume do Windows
+        # REMOVIDO: Restauração de Volume Interno (Ducking)
 
-        # 2. Solta Play Externo
+        # 1. Solta Play Externo (Spotify)
         try: pyautogui.press("playpause") 
         except: pass
 
-        # 3. Retoma Vídeo ou Volume
+        # 2. Retoma Vídeo (apenas Play, sem mexer no volume)
         if self.mem_time > 0:
             self.play_video(self.video_atual, resume=True)
             self.after(500, lambda: self.player.set_time(self.mem_time))
-        else:
-            self.player.audio_set_volume(self.saved_volume)
 
     # --- CONSULTA DE STATUS (USADO PELO DASHBOARD) ---
     def get_tts_status(self):
@@ -318,7 +286,6 @@ class VisioDeckPlayer(ctk.CTk):
         try:
             length = self.tts_player.get_length()
             time_ms = self.tts_player.get_time()
-            is_playing = self.tts_player.is_playing()
             if length <= 0: return True, 0, 100 
             return True, time_ms, length
         except:
@@ -374,7 +341,7 @@ class VisioDeckPlayer(ctk.CTk):
 
         self.player.set_hwnd(self.canvas.winfo_id())
         self.player.set_media(self.vlc_video.media_new(path))
-        if resume: self.player.audio_set_volume(self.saved_volume)
+        # REMOVIDO: self.player.audio_set_volume(self.saved_volume)
         self.player.play()
         if start_paused:
             self.after(100, lambda: self.player.pause())
@@ -533,8 +500,6 @@ class VisioDeckPlayer(ctk.CTk):
             if st == vlc.State.Ended or st == vlc.State.Error:
                 if self.modo_ad:
                     self.modo_ad = False
-                    try: ControleVolume.set_volume(self.windows_vol_cache)
-                    except: pass
                     self.play_video(self.video_atual, resume=True)
                     self.after(500, lambda: self.player.set_time(self.mem_time))
                 else:

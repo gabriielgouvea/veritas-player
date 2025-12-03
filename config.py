@@ -40,3 +40,8 @@ def resource_path(relative_path):
 # O sistema vai procurar esses arquivos JUNTOS do executável
 FFMPEG_PATH = resource_path("ffmpeg.exe")
 FFPROBE_PATH = resource_path("ffprobe.exe")
+
+# --- ATUALIZAÇÕES ---
+CURRENT_VERSION = "19.16"
+# Substitua pelo link RAW do seu arquivo JSON no GitHub ou seu servidor
+UPDATE_JSON_URL = "https://raw.githubusercontent.com/SEU_USUARIO/VeritasPlayer/main/version.json"

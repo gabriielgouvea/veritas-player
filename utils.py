@@ -1,17 +1,13 @@
-# utils.py (Versão 19.5 - Fix Definitivo de Áudio)
 import customtkinter as ctk
 import tkinter as tk
 import json
 import os
 import base64
+import urllib.request
+import webbrowser
 from config import *
 
-# Dependências de Áudio do Windows
-import comtypes
-from ctypes import cast, POINTER
-from comtypes import CLSCTX_ALL
-from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
-
+# --- FERRAMENTAS DE INTERFACE ---
 class ToolTip(object):
     def __init__(self, widget, text):
         self.widget = widget
@@ -91,6 +87,7 @@ class ModernPopUp(ctk.CTkToplevel):
         self.resultado = True
         self.destroy()
 
+# --- PERSISTÊNCIA DE DADOS ---
 def carregar_db():
     if os.path.exists(DB_FILE):
         try:
@@ -106,61 +103,41 @@ def garantir_alerta_sonoro():
     path = "ding.mp3"
     if not os.path.exists(path):
         try:
+            # Base64 do som de alerta padrão
             b64 = "SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA//NkxAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NkxAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NkxAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NkxAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NkxAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NkxAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NkxAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NkxAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NkxAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NkxAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NkxAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NkxAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NkxAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NkxAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NkxAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NkxAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NkxAAs8ANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NkxAYx8ANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NkxAcysANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NkxAgzcANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NkxAk0MANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NkxAk0MANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NkxAk0MANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NkxAk0MANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq"
             with open(path, "wb") as f:
                 f.write(base64.b64decode(b64))
         except Exception as e:
             print(f"Erro ao criar alerta sonoro: {e}")
             return None 
-            
     return path
 
-# --- CONTROLE DE VOLUME DO WINDOWS (MASTER) - VERSÃO BLINDADA ---
-class ControleVolume:
-    @staticmethod
-    def _get_interface():
-        # Método interno para tentar pegar a interface de áudio de forma ROBUSTA
-        comtypes.CoInitialize() # Inicializa COM para Threads
-        
-        try:
-            # TENTATIVA 1: Via Enumerador de Dispositivos (Mais confiável)
-            devices = AudioUtilities.GetDeviceEnumerator()
-            # 0 = eRender (Saída), 1 = eMultimedia (Papel do dispositivo)
-            default_device = devices.GetDefaultAudioEndpoint(0, 1) 
-            interface = default_device.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-            return cast(interface, POINTER(IAudioEndpointVolume))
-        except Exception as e:
-            print(f"Tentativa 1 falhou: {e}")
+# --- SISTEMA DE ATUALIZAÇÃO (NOVO) ---
+def verificar_updates(url_json, versao_atual):
+    """
+    Verifica se há uma nova versão disponível no servidor.
+    Retorna uma tupla: (tem_atualizacao_bool, dados_nova_versao_dict)
+    """
+    try:
+        # Usa urllib padrão para não precisar de 'requests' (mais leve)
+        # Timeout curto (3s) para não travar a interface se a internet estiver lenta
+        with urllib.request.urlopen(url_json, timeout=3) as url:
+            data = json.loads(url.read().decode())
             
-        try:
-            # TENTATIVA 2: Via Método Simplificado (Fallback)
-            devices = AudioUtilities.GetSpeakers()
-            interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-            return cast(interface, POINTER(IAudioEndpointVolume))
-        except Exception as e:
-            print(f"Tentativa 2 falhou: {e}")
+            remote_ver = data.get("version", "0.0")
             
-        return None
+            # Comparação simples de strings (pode ser expandida para Semantic Versioning se necessário)
+            # Se a versão remota for diferente da atual, sugere update
+            if remote_ver != versao_atual:
+                return True, data
+            
+    except Exception as e:
+        print(f"Erro ao verificar update: {e}")
+        return False, None
+    
+    return False, None
 
-    @staticmethod
-    def get_volume():
-        interface = ControleVolume._get_interface()
-        if interface:
-            try:
-                vol = interface.GetMasterVolumeLevelScalar()
-                return int(round(vol * 100))
-            except Exception as e:
-                print(f"Erro ao ler volume: {e}")
-        return 50 # Fallback se falhar tudo
-
-    @staticmethod
-    def set_volume(valor):
-        interface = ControleVolume._get_interface()
-        if interface:
-            try:
-                # Garante que está entre 0.0 e 1.0 (float)
-                val_float = max(0.0, min(1.0, float(valor) / 100.0))
-                interface.SetMasterVolumeLevelScalar(val_float, None)
-                print(f"Volume alterado para: {int(val_float*100)}%")
-            except Exception as e:
-                print(f"Erro ao definir volume: {e}")
+def abrir_link_download(url):
+    """ Abre o link de download no navegador padrão """
+    if url:
+        webbrowser.open(url)

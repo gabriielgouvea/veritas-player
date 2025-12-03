@@ -1,4 +1,4 @@
-# dashboard.py (Versão 19.13 - Sync via Player Polling)
+# dashboard.py (Versão 19.17 - Update System Integrated)
 import customtkinter as ctk
 import os
 import time
@@ -11,7 +11,7 @@ import sys
 from datetime import datetime
 from tkinter import filedialog
 from config import *
-from utils import ModernPopUp, carregar_db, salvar_db, garantir_alerta_sonoro, ControleVolume
+from utils import ModernPopUp, carregar_db, salvar_db, garantir_alerta_sonoro, verificar_updates, abrir_link_download
 from downloader import YoutubeDownloader
 
 MSG_FILE = "mensagens_locutor.json"
@@ -24,7 +24,7 @@ def log(msg):
 class DashboardWindow(ctk.CTkToplevel):
     def __init__(self, parent, player):
         super().__init__(parent)
-        self.title("Veritas - Painel de Controle")
+        self.title(f"Veritas - Painel de Controle (v{CURRENT_VERSION})")
         self.configure(fg_color=VERITAS_BG_DASH)
         self.player = player
         
@@ -58,13 +58,19 @@ class DashboardWindow(ctk.CTkToplevel):
         ctk.CTkFrame(self.sidebar, height=2, fg_color="#F0F2F5").pack(fill="x", padx=20, pady=10)
         self.create_menu_btn("⬇️  Baixar do YouTube", "download")
         self.create_menu_btn("☕  Apoiar Projeto", "donate") 
+        
+        # --- NOVO BOTÃO DE UPDATE ---
         ctk.CTkFrame(self.sidebar, height=2, fg_color="#F0F2F5").pack(fill="x", padx=20, pady=10)
+        ctk.CTkButton(self.sidebar, text="🔄  Verificar Updates", command=self.checar_atualizacao, 
+                      fg_color="#E3F2FD", text_color=VERITAS_BLUE, hover_color="#BBDEFB", 
+                      font=("Segoe UI", 12, "bold"), height=40, anchor="center").pack(fill="x", padx=20, pady=5)
+        # ----------------------------
         
         ctk.CTkButton(self.sidebar, text="🔙  Voltar ao Player", command=self.destroy, 
                       fg_color="#FFF", text_color=VERITAS_BLUE, hover_color="#F0F2F5", 
                       font=("Segoe UI", 14, "bold"), height=50, anchor="w").pack(fill="x", padx=10)
 
-        ctk.CTkLabel(self.sidebar, text="v19.13 - Realtime", text_color="#AAA", font=("Segoe UI", 10, "bold")).pack(side="bottom", pady=(0, 10))
+        ctk.CTkLabel(self.sidebar, text=f"v{CURRENT_VERSION} - Stable", text_color="#AAA", font=("Segoe UI", 10, "bold")).pack(side="bottom", pady=(0, 10))
         ctk.CTkLabel(self.sidebar, text="Desenvolvido por Gabriel Gouvêa", text_color="#CCC", font=("Segoe UI", 9)).pack(side="bottom", pady=5)
 
         self.main_area = ctk.CTkFrame(self, fg_color="transparent")
@@ -94,7 +100,32 @@ class DashboardWindow(ctk.CTkToplevel):
             container.pack(fill="both", expand=True)
             YoutubeDownloader(container, self.player.pasta_treino).pack(fill="both", expand=True)
 
-    # --- LOCUTOR ---
+    # --- SISTEMA DE ATUALIZAÇÃO ---
+    def checar_atualizacao(self):
+        self.configure(cursor="watch")
+        self.update()
+        
+        # Chama a função do utils.py
+        tem_update, dados = verificar_updates(UPDATE_JSON_URL, CURRENT_VERSION)
+        
+        self.configure(cursor="arrow")
+        
+        if tem_update:
+            msg = (f"Nova versão disponível: v{dados['version']}\n\n"
+                   f"Novidades:\n{dados.get('changelog', 'Melhorias gerais.')}\n\n"
+                   "Deseja baixar e instalar agora?")
+            
+            modal = ModernPopUp(self, "Atualização Encontrada!", msg, "yesno")
+            if modal.resultado:
+                abrir_link_download(dados['url_download'])
+                self.destroy() # Fecha dashboard
+                try: self.player.destroy() # Tenta fechar o player principal
+                except: pass
+                sys.exit(0) # Mata o processo para permitir instalação
+        else:
+            ModernPopUp(self, "Tudo Atualizado", f"Você já está na versão mais recente (v{CURRENT_VERSION}).")
+
+    # --- LOCUTOR (INTERFACE LIMPA) ---
     def render_locutor(self):
         self.header("Locutor Virtual (IA)", "Digite uma mensagem ou selecione uma pronta.")
         left = ctk.CTkFrame(self.main_area, fg_color="white", corner_radius=10)
@@ -113,13 +144,8 @@ class DashboardWindow(ctk.CTkToplevel):
         ctrl_area = ctk.CTkFrame(left, fg_color="transparent")
         ctrl_area.pack(fill="x", padx=20, pady=10)
         
-        ctk.CTkLabel(ctrl_area, text="Volume PC (%):", font=("Segoe UI", 12, "bold"), text_color="#555").pack(side="left", padx=(0,5))
-        self.e_vol = ctk.CTkEntry(ctrl_area, width=50, font=("Segoe UI", 12))
-        self.e_vol.pack(side="left")
-        self.e_vol.insert(0, "60") 
-        
         self.btn_falar = ctk.CTkButton(ctrl_area, text="🔊 ANUNCIAR AGORA", height=50, fg_color=VERITAS_BLUE, font=("Segoe UI", 14, "bold"), command=self.falar_texto)
-        self.btn_falar.pack(side="left", fill="x", expand=True, padx=(10,5))
+        self.btn_falar.pack(side="left", fill="x", expand=True, padx=(0,5))
 
         self.btn_stop = ctk.CTkButton(ctrl_area, text="⏹ PARAR", height=50, width=80, fg_color=VERITAS_DANGER, font=("Segoe UI", 12, "bold"), state="disabled", command=self.parar_fala)
         self.btn_stop.pack(side="right")
@@ -205,12 +231,9 @@ class DashboardWindow(ctk.CTkToplevel):
         self.progress_tts.set(0)
         self.lbl_prog_tts.configure(text="Processando áudio...")
         
-        try: vol_alvo = int(self.e_vol.get())
-        except: vol_alvo = 80
-        
-        threading.Thread(target=self.thread_gerar_audio, args=(txt, vol_alvo), daemon=True).start()
+        threading.Thread(target=self.thread_gerar_audio, args=(txt,), daemon=True).start()
 
-    def thread_gerar_audio(self, texto, volume_windows):
+    def thread_gerar_audio(self, texto):
         log("Thread Iniciada")
         try:
             try:
@@ -259,9 +282,7 @@ class DashboardWindow(ctk.CTkToplevel):
             
             time.sleep(1.0) 
 
-            # AQUI ESTÁ A MUDANÇA CRUCIAL:
-            # Em vez de tentar calcular a duração, chamamos o play e monitoramos
-            self.after(0, lambda: self.iniciar_playback_monitorado(arquivo_final, volume_windows))
+            self.after(0, lambda: self.iniciar_playback_monitorado(arquivo_final))
             
             try: os.remove(temp_voz)
             except: pass
@@ -270,10 +291,10 @@ class DashboardWindow(ctk.CTkToplevel):
             log(f"ERRO: {e}")
             self.after(0, self.reset_btn_falar)
 
-    def iniciar_playback_monitorado(self, arquivo, volume_windows):
+    def iniciar_playback_monitorado(self, arquivo):
         log("Mandando Player Tocar")
-        # Player toca e ajusta volume
-        self.player.tocar_anuncio(os.path.abspath(arquivo), volume_windows)
+        # Player toca (agora sem argumento de volume)
+        self.player.tocar_anuncio(os.path.abspath(arquivo))
         
         # Dashboard entra em loop de monitoramento
         self.after(200, self.monitorar_tts_realtime)
