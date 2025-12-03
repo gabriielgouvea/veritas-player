@@ -1,27 +1,81 @@
-# player.py (Versão 19.14 - COMPLETO E INTEGRO)
+import os
+import sys
+import ctypes # <--- Importante para forçar o carregamento
+
+# --- VARIÁVEIS GLOBAIS ---
+PLUGIN_PATH = ""
+
+# --- FIX "NUCLEAR" PARA VLC ---
+if os.name == 'nt':
+    try:
+        # 1. Descobrir onde estamos (Path Real)
+        if getattr(sys, 'frozen', False):
+            # Se for EXE, pega a pasta do executável
+            app_dir = os.path.dirname(os.path.abspath(sys.executable))
+        else:
+            # Se for Terminal, pega o diretório atual
+            app_dir = os.getcwd()
+
+        # 2. Definir caminhos críticos
+        dll_vlc = os.path.join(app_dir, 'libvlc.dll')
+        dll_core = os.path.join(app_dir, 'libvlccore.dll')
+        PLUGIN_PATH = os.path.join(app_dir, "plugins")
+
+        # 3. DEBUG VISUAL (Isso vai salvar sua sanidade)
+        # Se a DLL não existir, avisa antes de quebrar
+        if not os.path.exists(dll_vlc):
+            ctypes.windll.user32.MessageBoxW(0, f"ARQUIVO SUMIU!\nNão achei: {dll_vlc}", "Erro Fatal", 0x10)
+
+        # 4. Adicionar ao Path do Windows
+        os.add_dll_directory(app_dir)
+        
+        # 5. Configurar Variáveis de Ambiente
+        os.environ['PYTHON_VLC_MODULE_PATH'] = app_dir
+        os.environ['VLC_PLUGIN_PATH'] = PLUGIN_PATH
+
+        # 6. CARREGAMENTO FORÇADO (O Pulo do Gato)
+        # Isso obriga o Windows a carregar a DLL na memória AGORA.
+        ctypes.CDLL(dll_core)
+        ctypes.CDLL(dll_vlc)
+        
+    except Exception as e:
+        ctypes.windll.user32.MessageBoxW(0, f"Erro ao carregar DLLs:\n{e}", "Erro VLC", 0x10)
+
+# --- AGORA SIM IMPORTAMOS O RESTO ---
+import vlc 
 import customtkinter as ctk
 import tkinter as tk
-import vlc
-import os
 import time
 import json
 import random
 import pyautogui
-import sys 
 from datetime import datetime
 from config import *
 from utils import ToolTip, carregar_db, salvar_db, ControleVolume
 from dashboard import DashboardWindow
 
-# Fix para carregar DLLs do VLC localmente ou congelado
-if os.name == 'nt':
-    try:
-        if hasattr(sys, '_MEIPASS'):
-            os.add_dll_directory(sys._MEIPASS)
-        else:
-            os.add_dll_directory(os.getcwd())
-    except:
-        pass
+class VisioDeckPlayer(ctk.CTk):
+    def __init__(self):
+        super().__init__()
+        
+        # ... (Configurações da Janela...) ...
+        self.title("Veritas Player")
+        self.configure(fg_color=VERITAS_PLAYER_BG)
+        self.geometry("1200x800")
+        self.after(100, lambda: self.state("zoomed"))
+        self.is_fullscreen = False
+
+        # --- CONFIGURAÇÃO DOS PLAYERS COM CAMINHO EXPLÍCITO ---
+        # Aqui passamos o caminho dos plugins "na marra" para garantir
+        param_plugins = f"--vlc-plugins-path={PLUGIN_PATH}" if PLUGIN_PATH else ""
+        
+        # PLAYER 1: VÍDEO
+        self.vlc_video = vlc.Instance(param_plugins, "--no-xlib", "--input-repeat=0", "--disable-screensaver", "--avcodec-hw=none")
+        self.player = self.vlc_video.media_player_new()
+        
+        # PLAYER 2: ÁUDIO/TTS
+        self.vlc_audio = vlc.Instance(param_plugins, "--aout=directsound") 
+        self.tts_player = self.vlc_audio.media_player_new()
 
 class VisioDeckPlayer(ctk.CTk):
     def __init__(self):
@@ -36,17 +90,11 @@ class VisioDeckPlayer(ctk.CTk):
         self.is_fullscreen = False
         
         # --- CONFIGURAÇÃO DOS PLAYERS (DUAL INSTANCE) ---
-        
-        # PLAYER 1: VÍDEO (Hardware Acceleration Desligado para estabilidade)
-        self.vlc_video = vlc.Instance(
-            "--no-xlib", 
-            "--input-repeat=0", 
-            "--disable-screensaver", 
-            "--avcodec-hw=none"
-        )
+        # PLAYER 1: VÍDEO
+        self.vlc_video = vlc.Instance("--no-xlib", "--input-repeat=0", "--disable-screensaver", "--avcodec-hw=none")
         self.player = self.vlc_video.media_player_new()
         
-        # PLAYER 2: ÁUDIO/TTS (DirectSound para sobreposição)
+        # PLAYER 2: ÁUDIO/TTS
         self.vlc_audio = vlc.Instance("--aout=directsound") 
         self.tts_player = self.vlc_audio.media_player_new()
         
@@ -61,7 +109,6 @@ class VisioDeckPlayer(ctk.CTk):
         self.playlist_folders = {}
         self.current_playlist = []
         self.current_playlist_name = "TODOS"
-        
         self.idx_video = 0
         self.is_playing = False
         
@@ -73,8 +120,6 @@ class VisioDeckPlayer(ctk.CTk):
         self.mem_time = 0          
         self.video_atual = ""      
         self.saved_volume = 100    
-        
-        # Cache de Volume do Windows (Smart Volume)
         self.windows_vol_cache = 50 
         
         self.hist_minuto = [] 
@@ -83,7 +128,6 @@ class VisioDeckPlayer(ctk.CTk):
         self.shuffle = False
         self.repeat_state = 0      
         self.repeat_one_done = False 
-        
         self.muted = False
         self.last_vol = 100
         
@@ -114,35 +158,27 @@ class VisioDeckPlayer(ctk.CTk):
         # Esquerda
         left_c = ctk.CTkFrame(bot_area, fg_color="transparent")
         left_c.pack(side="left")
-        
         self.btn_shuf = ctk.CTkButton(left_c, text="🔀", width=40, height=40, fg_color="transparent", font=("Arial", 20), command=self.toggle_shuffle, hover_color="#333", text_color="#777")
         self.btn_shuf.pack(side="left", padx=(0,10))
         ToolTip(self.btn_shuf, "Vídeo Aleatório")
-        
         self.lbl_time = ctk.CTkLabel(left_c, text="00:00 / 00:00", font=("Segoe UI", 12), text_color="#AAA")
         self.lbl_time.pack(side="left")
 
         # Centro
         center_c = ctk.CTkFrame(bot_area, fg_color="transparent")
         center_c.place(relx=0.5, rely=0.5, anchor="center")
-        
         btn_std = {"fg_color": "transparent", "text_color": "#EEE", "hover_color": "#333", "width": 50, "height": 50, "font": ("Arial", 24)}
         
         self.btn_prev = ctk.CTkButton(center_c, text="⏮", command=self.prev, **btn_std)
         self.btn_prev.pack(side="left", padx=5)
-        
         self.btn_rewind = ctk.CTkButton(center_c, text="↺ 10", command=lambda: self.skip_time(-10), fg_color="transparent", text_color="#DDD", hover_color="#333", width=50, height=50, font=("Segoe UI", 12, "bold"))
         self.btn_rewind.pack(side="left", padx=5)
-
         self.btn_play = ctk.CTkButton(center_c, text="⏯", command=self.play_pause, width=70, height=70, corner_radius=35, fg_color=VERITAS_BLUE, hover_color=VERITAS_BLUE_HOVER, font=("Arial", 30))
         self.btn_play.pack(side="left", padx=15)
-
         self.btn_fwd = ctk.CTkButton(center_c, text="↻ 10", command=lambda: self.skip_time(10), fg_color="transparent", text_color="#DDD", hover_color="#333", width=50, height=50, font=("Segoe UI", 12, "bold"))
         self.btn_fwd.pack(side="left", padx=5)
-
         self.btn_next = ctk.CTkButton(center_c, text="⏭", command=self.next, **btn_std)
         self.btn_next.pack(side="left", padx=5)
-        
         self.btn_rep = ctk.CTkButton(center_c, text="🔁", command=self.toggle_repeat, **btn_std)
         self.btn_rep.pack(side="left", padx=(15, 0))
         self.update_repeat_icon() 
@@ -150,14 +186,11 @@ class VisioDeckPlayer(ctk.CTk):
         # Direita
         right_c = ctk.CTkFrame(bot_area, fg_color="transparent")
         right_c.pack(side="right")
-
         self.btn_mute = ctk.CTkButton(right_c, text="🔊", width=40, command=self.toggle_mute, fg_color="transparent", hover_color="#333", font=("Arial", 20))
         self.btn_mute.pack(side="left")
-        
         self.sl_vol = ctk.CTkSlider(right_c, from_=0, to=100, width=100, command=self.set_vol, progress_color="white", button_color="white", button_hover_color="#DDD")
         self.sl_vol.set(100)
         self.sl_vol.pack(side="left", padx=10)
-        
         self.btn_fs = ctk.CTkButton(right_c, text="⛶", width=40, command=self.toggle_fs, fg_color="transparent", hover_color="#333", font=("Arial", 20))
         self.btn_fs.pack(side="left")
 
@@ -246,7 +279,6 @@ class VisioDeckPlayer(ctk.CTk):
         self.modo_tts = True
         self.btn_play.configure(text="⏸")
         
-        self.tts_player.set_hwnd(self.canvas.winfo_id()) # GARANTE VIDEO EM ADS
         self.tts_player.set_media(self.vlc_audio.media_new(arquivo_audio))
         self.tts_player.audio_set_volume(100) 
         self.tts_player.play()
@@ -490,7 +522,7 @@ class VisioDeckPlayer(ctk.CTk):
                         with open(DB_FILE,'w') as f: json.dump(cons,f,indent=4)
                 except: pass
 
-        # Fim de Mídia
+        # Verificação de Fim de Mídia
         if self.modo_tts:
             st = self.tts_player.get_state()
             if st == vlc.State.Ended or st == vlc.State.Error:
@@ -501,10 +533,8 @@ class VisioDeckPlayer(ctk.CTk):
             if st == vlc.State.Ended or st == vlc.State.Error:
                 if self.modo_ad:
                     self.modo_ad = False
-                    # Restaura Volume se for Video Ad
                     try: ControleVolume.set_volume(self.windows_vol_cache)
                     except: pass
-                    
                     self.play_video(self.video_atual, resume=True)
                     self.after(500, lambda: self.player.set_time(self.mem_time))
                 else:
