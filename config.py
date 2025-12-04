@@ -44,4 +44,4 @@ FFPROBE_PATH = resource_path("ffprobe.exe")
 # --- ATUALIZAÇÕES ---
 CURRENT_VERSION = "19.20"
 # Substitua pelo link RAW do seu arquivo JSON no GitHub ou seu servidor
-UPDATE_JSON_URL = "https://raw.githubusercontent.com/SEU_USUARIO/VeritasPlayer/main/version.json"
+UPDATE_JSON_URL = "https://github.com/gabriielgouvea/veritas-player/blob/main/version.json"
