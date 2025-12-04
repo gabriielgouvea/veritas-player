@@ -2,7 +2,7 @@ import os
 import sys
 import ctypes
 
-# --- FIX "NUCLEAR" PARA VLC ---
+# --- FIX "NUCLEAR" PARA VLC (CRÍTICO: DEVE VIR PRIMEIRO) ---
 if os.name == 'nt':
     try:
         # 1. Descobrir onde estamos (Path Real)
@@ -18,26 +18,26 @@ if os.name == 'nt':
         dll_core = os.path.join(app_dir, 'libvlccore.dll')
         PLUGIN_PATH = os.path.join(app_dir, "plugins")
 
-        # 3. DEBUG VISUAL (Segurança: avisa se faltar arquivo)
+        # 3. DEBUG VISUAL (Segurança: avisa se faltar arquivo vital)
         if not os.path.exists(dll_vlc):
             try:
                 ctypes.windll.user32.MessageBoxW(0, f"ARQUIVO SUMIU!\nNão achei: {dll_vlc}", "Erro Fatal", 0x10)
             except:
                 print(f"ERRO CRÍTICO: DLL não encontrada em {dll_vlc}")
 
-        # 4. Adicionar ao Path do Windows
+        # 4. Adicionar ao Path do Windows para carregamento
         os.add_dll_directory(app_dir)
         
-        # 5. Configurar Variáveis de Ambiente (ISSO É O QUE FAZ FUNCIONAR)
+        # 5. Configurar Variáveis de Ambiente (ISSO SUBSTITUI O PARAM_PLUGINS)
         os.environ['PYTHON_VLC_MODULE_PATH'] = app_dir
         os.environ['VLC_PLUGIN_PATH'] = PLUGIN_PATH
 
-        # 6. CARREGAMENTO FORÇADO
+        # 6. CARREGAMENTO FORÇADO VIA CTYPES
         try:
             ctypes.CDLL(dll_core)
             ctypes.CDLL(dll_vlc)
         except Exception as e:
-            # Aviso apenas informativo, não trava o app
+            # Se falhar aqui mas carregar depois, tudo bem. Apenas ignoramos.
             pass
         
     except Exception as e:
@@ -71,7 +71,8 @@ class VisioDeckPlayer(ctk.CTk):
         # --- CONFIGURAÇÃO DOS PLAYERS ---
         
         # PLAYER 1: VÍDEO 
-        # --quiet e --verbose=-1 limpam o terminal
+        # --quiet e --verbose=-1 limpam o terminal de erros D3D11
+        # --avcodec-hw=none evita travamentos com Intel UHD
         self.vlc_video = vlc.Instance(
             "--no-xlib", 
             "--input-repeat=0", 
@@ -83,11 +84,11 @@ class VisioDeckPlayer(ctk.CTk):
         )
         self.player = self.vlc_video.media_player_new()
         
-        # PLAYER 2: ÁUDIO/TTS
+        # PLAYER 2: ÁUDIO/TTS (DirectSound para mixagem independente)
         self.vlc_audio = vlc.Instance("--aout=directsound", "--quiet", "--verbose=-1") 
         self.tts_player = self.vlc_audio.media_player_new()
         
-        # --- ESTADO ---
+        # --- ESTADO E VARIÁVEIS ---
         self.pasta_treino = ""
         if os.path.exists(LAST_PATHS_FILE):
             try: 
@@ -101,29 +102,31 @@ class VisioDeckPlayer(ctk.CTk):
         self.idx_video = 0
         self.is_playing = False
         
-        # Flags
+        # Flags de Estado
         self.modo_ad = False       
         self.modo_tts = False      
         
-        # Memória
+        # Memória de Reprodução
         self.mem_time = 0          
         self.video_atual = ""      
         
         self.hist_minuto = [] 
         self.data_cache = datetime.now().strftime("%d/%m/%Y")
         
+        # Controles
         self.shuffle = False
         self.repeat_state = 0      
         self.repeat_one_done = False 
         self.muted = False
         self.last_vol = 100
         
+        # Mouse e UI
         self.last_mouse = (0,0)
         self.controls_on = False
         self.hide_task = None
         self.last_ad_timestamp = 0
 
-        # --- LAYOUT ---
+        # --- LAYOUT GUI ---
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
@@ -132,7 +135,7 @@ class VisioDeckPlayer(ctk.CTk):
         self.canvas = tk.Canvas(self.video_frame, bg="black", highlightthickness=0)
         self.canvas.pack(fill="both", expand=True)
         
-        # --- CONTROLES ---
+        # --- BARRA DE CONTROLES ---
         self.controls = ctk.CTkFrame(self, fg_color="#111", height=150, corner_radius=15, border_width=1, border_color="#333")
         
         self.slider = ctk.CTkSlider(self.controls, from_=0, to=1000, command=self.seek, progress_color=VERITAS_BLUE, button_color=VERITAS_BLUE, button_hover_color=VERITAS_BLUE_HOVER, fg_color="#333", height=16)
@@ -142,7 +145,7 @@ class VisioDeckPlayer(ctk.CTk):
         bot_area = ctk.CTkFrame(self.controls, fg_color="transparent")
         bot_area.pack(fill="both", expand=True, padx=30, pady=(5, 15))
         
-        # Esquerda
+        # Esquerda (Shuffle e Tempo)
         left_c = ctk.CTkFrame(bot_area, fg_color="transparent")
         left_c.pack(side="left")
         self.btn_shuf = ctk.CTkButton(left_c, text="🔀", width=40, height=40, fg_color="transparent", font=("Arial", 20), command=self.toggle_shuffle, hover_color="#333", text_color="#777")
@@ -151,7 +154,7 @@ class VisioDeckPlayer(ctk.CTk):
         self.lbl_time = ctk.CTkLabel(left_c, text="00:00 / 00:00", font=("Segoe UI", 12), text_color="#AAA")
         self.lbl_time.pack(side="left")
 
-        # Centro
+        # Centro (Play, Pause, Skip)
         center_c = ctk.CTkFrame(bot_area, fg_color="transparent")
         center_c.place(relx=0.5, rely=0.5, anchor="center")
         btn_std = {"fg_color": "transparent", "text_color": "#EEE", "hover_color": "#333", "width": 50, "height": 50, "font": ("Arial", 24)}
@@ -170,7 +173,7 @@ class VisioDeckPlayer(ctk.CTk):
         self.btn_rep.pack(side="left", padx=(15, 0))
         self.update_repeat_icon() 
 
-        # Direita
+        # Direita (Volume e Fullscreen)
         right_c = ctk.CTkFrame(bot_area, fg_color="transparent")
         right_c.pack(side="right")
         self.btn_mute = ctk.CTkButton(right_c, text="🔊", width=40, command=self.toggle_mute, fg_color="transparent", hover_color="#333", font=("Arial", 20))
@@ -196,7 +199,7 @@ class VisioDeckPlayer(ctk.CTk):
         self.canvas.bind("<Motion>", self.on_mouse_move)
         self.bind_all("<Escape>", self.toggle_fs)
 
-        # Início
+        # Início dos Loops
         self.check_mouse_polling()
         self.sys_loop()
         self.ui_loop()
@@ -207,7 +210,7 @@ class VisioDeckPlayer(ctk.CTk):
     def open_dash(self):
         DashboardWindow(self, self)
     
-    # --- MÉTODOS DE ÁUDIO (TOTALMENTE MANUAL) ---
+    # --- MÉTODOS DE ÁUDIO (MANUAL - SEM AUTOMAÇÃO DE VOLUME) ---
     def tocar_audio_background(self, arquivo_audio):
         """ Toca áudio sem parar vídeo, e SEM baixar volume do vídeo """
         if not os.path.exists(arquivo_audio): return
@@ -222,7 +225,7 @@ class VisioDeckPlayer(ctk.CTk):
         self.mem_time = 0 
         
         self.tts_player.set_media(self.vlc_audio.media_new(arquivo_audio))
-        self.tts_player.audio_set_volume(100) # Volume do Locutor sempre no máximo
+        self.tts_player.audio_set_volume(100)
         self.tts_player.play()
         
         self.controls.place_forget()
@@ -280,7 +283,7 @@ class VisioDeckPlayer(ctk.CTk):
         except:
             return False, 0, 0
 
-    # --- NAVEGAÇÃO E RESTO ---
+    # --- NAVEGAÇÃO E GERENCIAMENTO DE PLAYLIST ---
     def change_playlist(self, name):
         if name in self.playlist_folders:
             self.current_playlist_name = name
@@ -315,6 +318,7 @@ class VisioDeckPlayer(ctk.CTk):
             else: self.lbl_info.configure(text="Nenhum vídeo encontrado!")
         except: pass
 
+    # --- CONTROLE DE VÍDEO E TRANSIÇÃO LIMPA ---
     def play_video(self, target, ad=False, resume=False, start_paused=False, keep_repeat=False):
         path = ""
         if ad: path = target 
@@ -351,7 +355,7 @@ class VisioDeckPlayer(ctk.CTk):
             self.modo_tts = False 
             
             # --- FIX DA BARRA PRESA (TRANSICAO LIMPA) ---
-            # Se for troca automática, mantém escondido se já estiver escondido.
+            # Se for troca automática (sem resume), esconde a barra
             if not resume:
                 if self.controls_on:
                     # Se estava visível (usuario mexendo), garante que some em 3s

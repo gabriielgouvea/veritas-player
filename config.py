@@ -1,4 +1,4 @@
-# config.py (Versão Final - Portable Ready)
+# config.py (Versão 19.22 - URL RAW Corrigida + AppData)
 import customtkinter as ctk
 import os
 import sys
@@ -8,40 +8,45 @@ ctk.set_appearance_mode("Light")
 ctk.set_default_color_theme("blue")
 
 # Paleta Veritas Blue
-VERITAS_BLUE = "#2196F3"        
+VERITAS_BLUE = "#2196F3"
 VERITAS_BLUE_HOVER = "#1976D2"
-VERITAS_BG_DASH = "#F5F7FA"     
+VERITAS_BG_DASH = "#F5F7FA"
 VERITAS_WHITE = "#FFFFFF"
 VERITAS_TEXT = "#333333"
 VERITAS_DANGER = "#F44336"
 VERITAS_PLAYER_BG = "black"
 VERITAS_PRIMARY = VERITAS_BLUE 
 
-# --- ARQUIVOS DE DADOS (Ficam na pasta do usuário, não dentro do EXE) ---
-# Usamos os.getcwd() para que os dados fiquem na mesma pasta do executável
-DB_FILE = os.path.join(os.getcwd(), "contratos_midia.json")
-LAST_PATHS_FILE = os.path.join(os.getcwd(), "last_paths.txt")
-MSG_FILE = os.path.join(os.getcwd(), "mensagens_locutor.json")
-CONFIG_LOCUTOR = os.path.join(os.getcwd(), "config_locutor.json")
+# --- DEFINIÇÃO DA PASTA DE DADOS (CORREÇÃO DE PERMISSÃO) ---
+# Salva em C:\Users\Nome\AppData\Roaming\VeritasPlayer para não dar erro
+try:
+    app_data_dir = os.getenv('APPDATA')
+    DATA_FOLDER = os.path.join(app_data_dir, "VeritasPlayer")
+    if not os.path.exists(DATA_FOLDER):
+        os.makedirs(DATA_FOLDER)
+except Exception as e:
+    DATA_FOLDER = os.getcwd()
+
+# --- ARQUIVOS DE DADOS ---
+DB_FILE = os.path.join(DATA_FOLDER, "contratos_midia.json")
+LAST_PATHS_FILE = os.path.join(DATA_FOLDER, "last_paths.txt")
+MSG_FILE = os.path.join(DATA_FOLDER, "mensagens_locutor.json")
+CONFIG_LOCUTOR = os.path.join(DATA_FOLDER, "config_locutor.json")
 
 # --- FUNÇÃO MÁGICA DE RECURSOS INTERNOS ---
-# Essa função encontra arquivos (imagens, ffmpeg, vlc) se estiver compilado ou não
 def resource_path(relative_path):
-    """ Obtém o caminho absoluto para recursos, funciona para dev e para PyInstaller """
     try:
-        # PyInstaller cria uma pasta temporária em _MEIPASS
         base_path = sys._MEIPASS
     except Exception:
         base_path = os.path.abspath(".")
-
     return os.path.join(base_path, relative_path)
 
-# Caminhos das Ferramentas (Binários)
-# O sistema vai procurar esses arquivos JUNTOS do executável
+# Caminhos das Ferramentas
 FFMPEG_PATH = resource_path("ffmpeg.exe")
 FFPROBE_PATH = resource_path("ffprobe.exe")
 
 # --- ATUALIZAÇÕES ---
-CURRENT_VERSION = "19.21"
-# Substitua pelo link RAW do seu arquivo JSON no GitHub ou seu servidor
-UPDATE_JSON_URL = "https://github.com/gabriielgouvea/veritas-player/blob/main/version.json"
+CURRENT_VERSION = "19.22"
+
+# CORREÇÃO DO LINK: Mudou de 'blob' para 'raw'
+UPDATE_JSON_URL = "https://raw.githubusercontent.com/gabriielgouvea/veritas-player/main/version.json"
