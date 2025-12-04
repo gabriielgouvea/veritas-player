@@ -1,11 +1,8 @@
 import os
 import sys
-import ctypes # Importante para forçar o carregamento das DLLs
+import ctypes
 
-# --- VARIÁVEIS GLOBAIS ---
-PLUGIN_PATH = ""
-
-# --- FIX "NUCLEAR" PARA VLC (Executa ANTES de importar o módulo vlc) ---
+# --- FIX "NUCLEAR" PARA VLC ---
 if os.name == 'nt':
     try:
         # 1. Descobrir onde estamos (Path Real)
@@ -40,7 +37,7 @@ if os.name == 'nt':
             ctypes.CDLL(dll_core)
             ctypes.CDLL(dll_vlc)
         except Exception as e:
-            # Aviso apenas informativo
+            # Aviso apenas informativo, não trava o app
             pass
         
     except Exception as e:
@@ -64,7 +61,7 @@ class VisioDeckPlayer(ctk.CTk):
         super().__init__()
         
         # Configuração da Janela Principal
-        self.title("Veritas Player")
+        self.title(f"Veritas Player v{CURRENT_VERSION}")
         self.configure(fg_color=VERITAS_PLAYER_BG)
         self.geometry("1200x800")
         
@@ -72,10 +69,9 @@ class VisioDeckPlayer(ctk.CTk):
         self.is_fullscreen = False
         
         # --- CONFIGURAÇÃO DOS PLAYERS ---
-        # CORREÇÃO: Removido "param_plugins" que causava erro,
-        # pois já configuramos via os.environ no início.
         
         # PLAYER 1: VÍDEO 
+        # --quiet e --verbose=-1 limpam o terminal
         self.vlc_video = vlc.Instance(
             "--no-xlib", 
             "--input-repeat=0", 
@@ -211,7 +207,7 @@ class VisioDeckPlayer(ctk.CTk):
     def open_dash(self):
         DashboardWindow(self, self)
     
-    # --- MÉTODOS DE ÁUDIO (TOTALMENTE MANUAL - ZERO AUTOMAÇÃO DE VOLUME) ---
+    # --- MÉTODOS DE ÁUDIO (TOTALMENTE MANUAL) ---
     def tocar_audio_background(self, arquivo_audio):
         """ Toca áudio sem parar vídeo, e SEM baixar volume do vídeo """
         if not os.path.exists(arquivo_audio): return
@@ -221,8 +217,6 @@ class VisioDeckPlayer(ctk.CTk):
         except: pass
         time.sleep(0.5)
 
-        # REMOVIDO: Ducking (Não abaixa mais o volume do player de vídeo)
-        
         # 2. Toca Anúncio
         self.modo_tts = True
         self.mem_time = 0 
@@ -237,8 +231,6 @@ class VisioDeckPlayer(ctk.CTk):
     def tocar_anuncio(self, arquivo_audio, volume_alvo=100):
         """ Toca anúncio pausando vídeo (Modo Locutor) """
         if not os.path.exists(arquivo_audio): return
-        
-        # REMOVIDO: Lógica de volume_alvo do Windows
         
         try: pyautogui.press("playpause")
         except: pass
@@ -267,9 +259,6 @@ class VisioDeckPlayer(ctk.CTk):
         self.modo_tts = False
         self.configure(cursor="arrow")
         
-        # REMOVIDO: Restauração de Volume do Windows
-        # REMOVIDO: Restauração de Volume Interno (Ducking)
-
         # 1. Solta Play Externo (Spotify)
         try: pyautogui.press("playpause") 
         except: pass
@@ -341,7 +330,6 @@ class VisioDeckPlayer(ctk.CTk):
 
         self.player.set_hwnd(self.canvas.winfo_id())
         self.player.set_media(self.vlc_video.media_new(path))
-        # REMOVIDO: self.player.audio_set_volume(self.saved_volume)
         self.player.play()
         if start_paused:
             self.after(100, lambda: self.player.pause())
@@ -350,6 +338,7 @@ class VisioDeckPlayer(ctk.CTk):
         else:
             self.is_playing = True
             self.btn_play.configure(text="⏸")
+        
         if ad: 
             self.modo_ad = True
             self.controls.place_forget()
@@ -360,10 +349,22 @@ class VisioDeckPlayer(ctk.CTk):
         else: 
             self.modo_ad = False
             self.modo_tts = False 
-            if resume:
+            
+            # --- FIX DA BARRA PRESA (TRANSICAO LIMPA) ---
+            # Se for troca automática, mantém escondido se já estiver escondido.
+            if not resume:
+                if self.controls_on:
+                    # Se estava visível (usuario mexendo), garante que some em 3s
+                    if self.hide_task: self.after_cancel(self.hide_task)
+                    self.hide_task = self.after(3000, self.hide_controls)
+                else:
+                    # Transição limpa: esconde cursor e barra
+                    self.configure(cursor="none")
+                    self.controls.place_forget()
+            else:
+                # Resume (pós-anuncio): esconde tudo
                 self.configure(cursor="none")
                 self.controls.place_forget()
-            else: self.show_controls()
 
     def skip_time(self, seconds):
         if not self.is_playing: return
