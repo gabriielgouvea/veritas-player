@@ -2,7 +2,7 @@
 ; Requer Inno Setup instalado
 
 #define MyAppName "Veritas Player"
-#define MyAppVersion "19.17"
+#define MyAppVersion "19.20"
 #define MyAppPublisher "Gabriel Gouvea"
 #define MyAppExeName "VeritasPlayer.exe"
 
