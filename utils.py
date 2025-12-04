@@ -5,6 +5,8 @@ import os
 import base64
 import urllib.request
 import webbrowser
+import time
+import random
 from config import *
 
 # --- FERRAMENTAS DE INTERFACE ---
@@ -103,7 +105,6 @@ def garantir_alerta_sonoro():
     path = "ding.mp3"
     if not os.path.exists(path):
         try:
-            # Base64 do som de alerta padrão
             b64 = "SUQzBAAAAAAAI1RTU0UAAAAPAAADTGF2ZjU4Ljc2LjEwMAAAAAAAAAAAAAAA//NkxAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NkxAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NkxAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NkxAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NkxAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NkxAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NkxAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NkxAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NkxAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NkxAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NkxAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NkxAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NkxAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NkxAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NkxAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NkxAAAAANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NkxAAs8ANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NkxAYx8ANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NkxAcysANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NkxAgzcANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NkxAk0MANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NkxAk0MANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NkxAk0MANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq//NkxAk0MANIAAAAAExBTUUzLjEwMKqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq"
             with open(path, "wb") as f:
                 f.write(base64.b64decode(b64))
@@ -112,32 +113,43 @@ def garantir_alerta_sonoro():
             return None 
     return path
 
-# --- SISTEMA DE ATUALIZAÇÃO (NOVO) ---
+# --- SISTEMA DE ATUALIZAÇÃO (COM DEBUG E ANTI-CACHE) ---
 def verificar_updates(url_json, versao_atual):
-    """
-    Verifica se há uma nova versão disponível no servidor.
-    Retorna uma tupla: (tem_atualizacao_bool, dados_nova_versao_dict)
-    """
+    print(f"\n--- INICIANDO VERIFICAÇÃO DE UPDATE ---")
+    print(f"Versão Local: {versao_atual}")
+    
+    # Adiciona parametro aleatório para evitar Cache do GitHub
+    url_final = f"{url_json}?t={int(time.time())}{random.randint(1,999)}"
+    print(f"Consultando URL: {url_final}")
+
     try:
-        # Usa urllib padrão para não precisar de 'requests' (mais leve)
-        # Timeout curto (3s) para não travar a interface se a internet estiver lenta
-        with urllib.request.urlopen(url_json, timeout=3) as url:
-            data = json.loads(url.read().decode())
+        req = urllib.request.Request(
+            url_final, 
+            headers={'User-Agent': 'Mozilla/5.0'} # Finge ser um navegador
+        )
+        
+        with urllib.request.urlopen(req, timeout=5) as response:
+            conteudo = response.read().decode('utf-8')
+            print(f"Conteúdo baixado do GitHub:\n{conteudo}")
             
+            data = json.loads(conteudo)
             remote_ver = data.get("version", "0.0")
             
-            # Comparação simples de strings (pode ser expandida para Semantic Versioning se necessário)
-            # Se a versão remota for diferente da atual, sugere update
+            print(f"Versão Remota Encontrada: {remote_ver}")
+            
             if remote_ver != versao_atual:
+                print(">> ATUALIZAÇÃO DISPONÍVEL! <<")
                 return True, data
+            else:
+                print(">> JÁ ESTÁ ATUALIZADO <<")
             
     except Exception as e:
-        print(f"Erro ao verificar update: {e}")
+        print(f"ERRO ao verificar update: {e}")
         return False, None
     
     return False, None
 
 def abrir_link_download(url):
-    """ Abre o link de download no navegador padrão """
+    print(f"Abrindo link: {url}")
     if url:
         webbrowser.open(url)
