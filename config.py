@@ -46,7 +46,7 @@ FFMPEG_PATH = resource_path("ffmpeg.exe")
 FFPROBE_PATH = resource_path("ffprobe.exe")
 
 # --- ATUALIZAÇÕES ---
-CURRENT_VERSION = "19.22"
+CURRENT_VERSION = "19.23"
 
 # CORREÇÃO DO LINK: Mudou de 'blob' para 'raw'
 UPDATE_JSON_URL = "https://raw.githubusercontent.com/gabriielgouvea/veritas-player/main/version.json"

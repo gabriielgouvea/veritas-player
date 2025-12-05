@@ -71,7 +71,7 @@ class DashboardWindow(ctk.CTkToplevel):
                       font=("Segoe UI", 14, "bold"), height=50, anchor="w").pack(fill="x", padx=10)
 
         ctk.CTkLabel(self.sidebar, text=f"v{CURRENT_VERSION} - Stable", text_color="#AAA", font=("Segoe UI", 10, "bold")).pack(side="bottom", pady=(0, 10))
-        ctk.CTkLabel(self.sidebar, text="Desenvolvido por Gabriel Gouvêa & meu parceiro Gemini.", text_color="#CCC", font=("Segoe UI", 9)).pack(side="bottom", pady=5)
+        ctk.CTkLabel(self.sidebar, text="Desenvolvido por Gabriel Gouvêa e meu parceiro Gemini.", text_color="#CCC", font=("Segoe UI", 9)).pack(side="bottom", pady=5)
 
         self.main_area = ctk.CTkFrame(self, fg_color="transparent")
         self.main_area.grid(row=0, column=1, sticky="nsew", padx=30, pady=30)

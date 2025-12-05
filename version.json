@@ -1,5 +1,5 @@
 {
-    "version": "19.20",
+    "version": "19.22",
     "url_download": "https://github.com/gabriielgouvea/veritas-player/releases/download/v19.20/VeritasPlayer_Setup_v19.20.exe",
     "changelog": "- Adicionado sistema de atualizações automáticas.\n- Removido controle manual de volume.\n- Melhorias de estabilidade no VLC."
 }
