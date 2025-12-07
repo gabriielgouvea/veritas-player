@@ -1,4 +1,3 @@
-# dashboard.py (Versão 19.17 - Update System Integrated)
 import customtkinter as ctk
 import os
 import time
@@ -14,9 +13,7 @@ from config import *
 from utils import ModernPopUp, carregar_db, salvar_db, garantir_alerta_sonoro, verificar_updates, abrir_link_download
 from downloader import YoutubeDownloader
 
-MSG_FILE = "mensagens_locutor.json"
-CONFIG_LOCUTOR = "config_locutor.json"
-
+# --- LOGGING ---
 def log(msg):
     print(f"[DEBUG] {msg}")
     sys.stdout.flush()
@@ -59,19 +56,18 @@ class DashboardWindow(ctk.CTkToplevel):
         self.create_menu_btn("⬇️  Baixar do YouTube", "download")
         self.create_menu_btn("☕  Apoiar Projeto", "donate") 
         
-        # --- NOVO BOTÃO DE UPDATE ---
+        # Botão Update
         ctk.CTkFrame(self.sidebar, height=2, fg_color="#F0F2F5").pack(fill="x", padx=20, pady=10)
         ctk.CTkButton(self.sidebar, text="🔄  Verificar Updates", command=self.checar_atualizacao, 
                       fg_color="#E3F2FD", text_color=VERITAS_BLUE, hover_color="#BBDEFB", 
                       font=("Segoe UI", 12, "bold"), height=40, anchor="center").pack(fill="x", padx=20, pady=5)
-        # ----------------------------
         
         ctk.CTkButton(self.sidebar, text="🔙  Voltar ao Player", command=self.destroy, 
                       fg_color="#FFF", text_color=VERITAS_BLUE, hover_color="#F0F2F5", 
                       font=("Segoe UI", 14, "bold"), height=50, anchor="w").pack(fill="x", padx=10)
 
         ctk.CTkLabel(self.sidebar, text=f"v{CURRENT_VERSION} - Stable", text_color="#AAA", font=("Segoe UI", 10, "bold")).pack(side="bottom", pady=(0, 10))
-        ctk.CTkLabel(self.sidebar, text="Desenvolvido por Gabriel Gouvêa e meu parceiro Gemini.", text_color="#CCC", font=("Segoe UI", 9)).pack(side="bottom", pady=5)
+        ctk.CTkLabel(self.sidebar, text="Desenvolvido por Gabriel Gouvêa", text_color="#CCC", font=("Segoe UI", 9)).pack(side="bottom", pady=5)
 
         self.main_area = ctk.CTkFrame(self, fg_color="transparent")
         self.main_area.grid(row=0, column=1, sticky="nsew", padx=30, pady=30)
@@ -100,32 +96,28 @@ class DashboardWindow(ctk.CTkToplevel):
             container.pack(fill="both", expand=True)
             YoutubeDownloader(container, self.player.pasta_treino).pack(fill="both", expand=True)
 
-    # --- SISTEMA DE ATUALIZAÇÃO ---
+    # --- ATUALIZAÇÃO ---
     def checar_atualizacao(self):
         self.configure(cursor="watch")
         self.update()
-        
-        # Chama a função do utils.py
         tem_update, dados = verificar_updates(UPDATE_JSON_URL, CURRENT_VERSION)
-        
         self.configure(cursor="arrow")
         
         if tem_update:
             msg = (f"Nova versão disponível: v{dados['version']}\n\n"
                    f"Novidades:\n{dados.get('changelog', 'Melhorias gerais.')}\n\n"
                    "Deseja baixar e instalar agora?")
-            
             modal = ModernPopUp(self, "Atualização Encontrada!", msg, "yesno")
             if modal.resultado:
                 abrir_link_download(dados['url_download'])
-                self.destroy() # Fecha dashboard
-                try: self.player.destroy() # Tenta fechar o player principal
+                self.destroy()
+                try: self.player.destroy()
                 except: pass
-                sys.exit(0) # Mata o processo para permitir instalação
+                sys.exit(0)
         else:
             ModernPopUp(self, "Tudo Atualizado", f"Você já está na versão mais recente (v{CURRENT_VERSION}).")
 
-    # --- LOCUTOR (INTERFACE LIMPA) ---
+    # --- LOCUTOR ---
     def render_locutor(self):
         self.header("Locutor Virtual (IA)", "Digite uma mensagem ou selecione uma pronta.")
         left = ctk.CTkFrame(self.main_area, fg_color="white", corner_radius=10)
@@ -241,14 +233,17 @@ class DashboardWindow(ctk.CTkToplevel):
                 asyncio.set_event_loop(loop)
             except: pass
 
-            temp_voz = "temp_voz.mp3"
-            arquivo_final = "anuncio_completo.mp3"
+            # CORREÇÃO CRÍTICA: Salvar em AppData para evitar erro de permissão
+            temp_voz = os.path.join(DATA_FOLDER, "temp_voz.mp3")
+            arquivo_final = os.path.join(DATA_FOLDER, "anuncio_completo.mp3")
             
             ffmpeg_exe = FFMPEG_PATH
             if not os.path.exists(ffmpeg_exe): ffmpeg_exe = "ffmpeg"
 
             path_alerta = self.alert_sound_path if self.alert_sound_path and os.path.exists(self.alert_sound_path) else garantir_alerta_sonoro()
-            
+            if not path_alerta or not os.path.exists(path_alerta):
+                path_alerta = None
+
             log("Gerando TTS...")
             VOZ = "pt-BR-FranciscaNeural" 
             async def _gen():
@@ -292,41 +287,31 @@ class DashboardWindow(ctk.CTkToplevel):
             self.after(0, self.reset_btn_falar)
 
     def iniciar_playback_monitorado(self, arquivo):
-        log("Mandando Player Tocar")
-        # Player toca (agora sem argumento de volume)
+        log(f"Mandando Player Tocar: {arquivo}")
         self.player.tocar_anuncio(os.path.abspath(arquivo))
-        
-        # Dashboard entra em loop de monitoramento
         self.after(200, self.monitorar_tts_realtime)
 
     def monitorar_tts_realtime(self):
-        # Pergunta ao Player como estamos
         playing, time_ms, length_ms = self.player.get_tts_status()
-        
         if playing:
             if length_ms > 0:
                 prog = time_ms / length_ms
                 self.progress_tts.set(prog)
                 self.lbl_prog_tts.configure(text=f"Tocando: {int(time_ms/1000)}s / {int(length_ms/1000)}s")
-            
-            # Continua monitorando
             self.after(100, self.monitorar_tts_realtime)
         else:
-            # Player parou (Acabou ou Stop)
             self.progress_tts.set(1.0 if length_ms > 0 else 0)
             self.lbl_prog_tts.configure(text="Concluído")
             self.reset_btn_falar()
 
     def parar_fala(self):
-        log("Parar Clicado")
-        self.player.parar_tts() # Player resolve tudo
-        # O loop monitorar_tts_realtime vai perceber que parou e resetar a UI
+        self.player.parar_tts()
 
     def reset_btn_falar(self):
         self.btn_falar.configure(state="normal", text="🔊 ANUNCIAR AGORA")
         self.btn_stop.configure(state="disabled")
 
-    # (RESTO DO CÓDIGO PERMANECE IGUAL: render_ad_create, render_donate, etc...)
+    # --- RESTAURANDO AS TELAS QUE FALTAVAM ---
     def render_ad_create(self):
         d = {}
         if self.editando_id:
@@ -646,6 +631,7 @@ class DashboardWindow(ctk.CTkToplevel):
         self.clipboard_append("gabriielgouvea@gmail.com")
         ModernPopUp(self, "Copiado", "Chave PIX copiada para a área de transferência!")
 
+    # --- RESTAURADO: RENDER CONFIG (A função que faltava) ---
     def render_config(self):
         self.header("Configuração", "Gerencie as pastas e a playlist ativa.")
         card = ctk.CTkFrame(self.main_area, fg_color="white", corner_radius=10)

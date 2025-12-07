@@ -53,33 +53,49 @@ class ToolTip(object):
 class ModernPopUp(ctk.CTkToplevel):
     def __init__(self, parent, titulo, mensagem, tipo="ok"):
         super().__init__(parent)
-        self.geometry("400x200")
+        
+        # --- AJUSTE VISUAL: Aumentei para caber o texto de update ---
+        w = 500
+        h = 300
+        self.geometry(f"{w}x{h}")
         self.title(titulo)
         self.attributes("-topmost", True)
         self.resizable(False, False)
         self.configure(fg_color="white")
         self.resultado = False
         
+        # --- CENTRALIZAÇÃO MELHORADA ---
         try:
-            self.geometry(f"+{parent.winfo_x()+300}+{parent.winfo_y()+300}")
-        except: pass
+            # Tenta centralizar exatamente no meio da janela pai
+            px = parent.winfo_x()
+            py = parent.winfo_y()
+            pw = parent.winfo_width()
+            ph = parent.winfo_height()
+            
+            x = px + (pw // 2) - (w // 2)
+            y = py + (ph // 2) - (h // 2)
+            self.geometry(f"+{x}+{y}")
+        except:
+            pass # Se falhar, usa o padrão do Windows
         
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)
         
-        ctk.CTkLabel(self, text=titulo.upper(), font=("Segoe UI", 16, "bold"), text_color=VERITAS_BLUE).pack(pady=(25,5))
-        ctk.CTkLabel(self, text=mensagem, font=("Segoe UI", 12), text_color="#555", wraplength=350).pack(pady=10)
+        ctk.CTkLabel(self, text=titulo.upper(), font=("Segoe UI", 18, "bold"), text_color=VERITAS_BLUE).pack(pady=(30,10))
+        
+        # Aumentei o wraplength para usar melhor a largura nova
+        ctk.CTkLabel(self, text=mensagem, font=("Segoe UI", 13), text_color="#555", wraplength=450).pack(pady=10)
         
         frame_btn = ctk.CTkFrame(self, fg_color="transparent")
-        frame_btn.pack(pady=20)
+        frame_btn.pack(side="bottom", pady=30)
         
-        btn_s = {"font": ("Segoe UI", 12, "bold"), "height": 35, "corner_radius": 6}
+        btn_s = {"font": ("Segoe UI", 12, "bold"), "height": 40, "corner_radius": 6}
         
         if tipo == "ok":
-            ctk.CTkButton(frame_btn, text="OK", width=100, fg_color=VERITAS_BLUE, hover_color=VERITAS_BLUE_HOVER, command=self.destroy, **btn_s).pack()
+            ctk.CTkButton(frame_btn, text="OK", width=120, fg_color=VERITAS_BLUE, hover_color=VERITAS_BLUE_HOVER, command=self.destroy, **btn_s).pack()
         elif tipo == "yesno":
-            ctk.CTkButton(frame_btn, text="SIM", width=100, fg_color=VERITAS_BLUE, hover_color=VERITAS_BLUE_HOVER, command=self.sim, **btn_s).pack(side="left", padx=10)
-            ctk.CTkButton(frame_btn, text="NÃO", width=100, fg_color="#EEE", text_color="#333", hover_color="#DDD", command=self.destroy, **btn_s).pack(side="left", padx=10)
+            ctk.CTkButton(frame_btn, text="SIM, ATUALIZAR", width=140, fg_color=VERITAS_BLUE, hover_color=VERITAS_BLUE_HOVER, command=self.sim, **btn_s).pack(side="left", padx=15)
+            ctk.CTkButton(frame_btn, text="AGORA NÃO", width=120, fg_color="#EEE", text_color="#333", hover_color="#DDD", command=self.destroy, **btn_s).pack(side="left", padx=15)
         
         self.transient(parent)
         self.grab_set()

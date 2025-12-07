@@ -28,7 +28,7 @@ if os.name == 'nt':
         # 4. Adicionar ao Path do Windows para carregamento
         os.add_dll_directory(app_dir)
         
-        # 5. Configurar Variáveis de Ambiente (ISSO SUBSTITUI O PARAM_PLUGINS)
+        # 5. Configurar Variáveis de Ambiente
         os.environ['PYTHON_VLC_MODULE_PATH'] = app_dir
         os.environ['VLC_PLUGIN_PATH'] = PLUGIN_PATH
 
@@ -37,7 +37,7 @@ if os.name == 'nt':
             ctypes.CDLL(dll_core)
             ctypes.CDLL(dll_vlc)
         except Exception as e:
-            # Se falhar aqui mas carregar depois, tudo bem. Apenas ignoramos.
+            # Se falhar aqui mas carregar depois, tudo bem.
             pass
         
     except Exception as e:
@@ -199,6 +199,9 @@ class VisioDeckPlayer(ctk.CTk):
         self.canvas.bind("<Motion>", self.on_mouse_move)
         self.bind_all("<Escape>", self.toggle_fs)
 
+        # --- NOVO: Configurar Marca D'água (Logo) ---
+        self.configurar_watermark()
+
         # Início dos Loops
         self.check_mouse_polling()
         self.sys_loop()
@@ -210,6 +213,35 @@ class VisioDeckPlayer(ctk.CTk):
     def open_dash(self):
         DashboardWindow(self, self)
     
+    # --- NOVO MÉTODO: CONFIGURAR MARCA D'ÁGUA ---
+    def configurar_watermark(self):
+        """ Configura a logo da Gouvea Automações no canto inferior esquerdo """
+        if not os.path.exists(LOGO_PATH):
+            print(f"Aviso: Logo não encontrada em {LOGO_PATH}")
+            return
+
+        try:
+            # 1. Habilita o filtro de logo (1 = ligado)
+            self.player.video_set_logo_int(vlc.VideoLogoOption.enable, 1)
+            
+            # 2. Define o arquivo da imagem (IMPORTANTE: O VLC as vezes pede bytes)
+            path_bytes = LOGO_PATH.encode('utf-8')
+            self.player.video_set_logo_string(vlc.VideoLogoOption.file, path_bytes)
+            
+            # 3. Define a posição: BottomLeft (Inferior Esquerdo = 6)
+            self.player.video_set_logo_int(vlc.VideoLogoOption.position, 6)
+
+            # 4. Define a transparência (0-255). 180 = Meio transparente
+            self.player.video_set_logo_int(vlc.VideoLogoOption.opacity, 180)
+            
+            # 5. Margem (Padding) das bordas
+            self.player.video_set_logo_int(vlc.VideoLogoOption.x, 30)
+            self.player.video_set_logo_int(vlc.VideoLogoOption.y, 30)
+            
+            print("Marca d'água configurada com sucesso.")
+        except Exception as e:
+            print(f"Erro ao configurar marca d'água: {e}")
+
     # --- MÉTODOS DE ÁUDIO (MANUAL - SEM AUTOMAÇÃO DE VOLUME) ---
     def tocar_audio_background(self, arquivo_audio):
         """ Toca áudio sem parar vídeo, e SEM baixar volume do vídeo """
