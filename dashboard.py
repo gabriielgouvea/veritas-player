@@ -574,10 +574,27 @@ class DashboardWindow(ctk.CTkToplevel):
     def masc_dt(self, e): self._m(e.widget, 10)
     def masc_hr(self, e): self._m(e.widget, 5)
     def _m(self, w, l): 
-        t=w.get().replace("/","").replace(":","")
-        if not t.isdigit(): return
-        w.delete(0,"end")
-        w.insert(0, (t[:2]+"/"+t[2:] if l==10 else t[:2]+":"+t[2:]) if len(t)>2 else t)
+        raw = w.get()
+        t = raw.replace("/", "").replace(":", "")
+        if t and not t.isdigit():
+            return
+
+        if l == 10:
+            t = t[:8]
+            if len(t) <= 2:
+                out = t
+            elif len(t) <= 4:
+                out = f"{t[:2]}/{t[2:]}"
+            else:
+                out = f"{t[:2]}/{t[2:4]}/{t[4:]}"
+        else:
+            t = t[:4]
+            out = (f"{t[:2]}:{t[2:]}" if len(t) > 2 else t)
+
+        if raw == out:
+            return
+        w.delete(0, "end")
+        w.insert(0, out)
     
     def add_hr(self, e=None): self._tag(self.e_hr, self.l_hours, self.fr_hr, self.rm_hr, 5)
     def add_dt(self, e=None): self._tag(self.e_dt, self.l_dates, self.fr_dt, self.rm_dt, 10)
