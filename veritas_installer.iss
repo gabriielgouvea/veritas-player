@@ -8,7 +8,11 @@
 
 [Setup]
 ; --- Identificação Única (Gere um GUID novo no Inno Setup se quiser) ---
-AppId={{8A23C9B1-5D3A-4E1F-9C2B-7A8D6E5F4G3H}}
+; AppId precisa ser um GUID válido (apenas 0-9/A-F). Exemplo:
+; AppId={{8A23C9B1-5D3A-4E1F-9C2B-7A8D6E5F4A3B}}
+
+; GUID válido gerado para este instalador
+AppId={{8A23C9B1-5D3A-4E1F-9C2B-7A8D6E5F4A3B}}
 
 ; --- Configurações Visuais ---
 AppName={#MyAppName}
