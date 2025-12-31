@@ -261,27 +261,17 @@ class VisioDeckPlayer(ctk.CTk):
         if not WATERMARK_UI_ENABLED or not self.watermark_label:
             return
 
-        try:
-            self.watermark_label.update_idletasks()
-            w = int(self.watermark_label.winfo_reqwidth())
-            h = int(self.watermark_label.winfo_reqheight())
-        except Exception:
-            w, h = 200, 40
+        # Usa posicionamento relativo para não depender do tamanho "reqwidth" (que pode mudar
+        # depois que a imagem carrega ou ao alternar fullscreen/DPI). Isso evita ficar "cortado".
+        controls_h = 150 if getattr(self, "controls_on", False) else 0
 
-        win_w = max(0, int(self.winfo_width()))
-        win_h = max(0, int(self.winfo_height()))
+        align_right = str(WATERMARK_ALIGN).lower() == "right"
+        relx = 1.0 if align_right else 0.0
+        anchor = "se" if align_right else "sw"
+        x = -int(WATERMARK_MARGIN_X) if align_right else int(WATERMARK_MARGIN_X)
+        y = -int(WATERMARK_MARGIN_Y) - int(controls_h)
 
-        x = WATERMARK_MARGIN_X
-        if str(WATERMARK_ALIGN).lower() == "right":
-            x = max(0, win_w - w - int(WATERMARK_MARGIN_X))
-
-        # Se os controles estiverem visíveis, sobe a watermark para não encostar neles.
-        controls_h = 0
-        if getattr(self, "controls_on", False):
-            controls_h = 150
-        y = max(0, win_h - h - int(WATERMARK_MARGIN_Y) - controls_h)
-
-        self.watermark_label.place(x=int(x), y=int(y))
+        self.watermark_label.place(relx=relx, rely=1.0, x=x, y=y, anchor=anchor)
         self.watermark_label.lift()
 
     def _load_watermark_ui_asset(self):
@@ -306,6 +296,7 @@ class VisioDeckPlayer(ctk.CTk):
                     text="",
                     fg_color="transparent",
                 )
+                self.after_idle(self._posicionar_watermark_ui)
                 return
             except Exception:
                 # Cai para texto
@@ -321,6 +312,7 @@ class VisioDeckPlayer(ctk.CTk):
             fg_color=WATERMARK_UI_BG,
             corner_radius=WATERMARK_UI_CORNER_RADIUS,
         )
+        self.after_idle(self._posicionar_watermark_ui)
 
     def tocar_audio_background(self, arquivo_audio):
         if not os.path.exists(arquivo_audio): return
@@ -557,6 +549,10 @@ class VisioDeckPlayer(ctk.CTk):
         if self.is_fullscreen: self.btn_settings.place_forget(); self.opt_playlist.place_forget(); self.attributes("-fullscreen", True)
         else: self.attributes("-fullscreen", False); self.state("zoomed"); self.btn_settings.place(relx=0.98, rely=0.03, anchor="ne"); self.opt_playlist.place(relx=0.88, rely=0.03, anchor="ne")
         self.show_controls()
+        # Garante reposicionamento depois que o Windows aplicar o fullscreen
+        self.after(60, self._posicionar_watermark_ui)
+        if self.watermark_label:
+            self.after(60, self.watermark_label.lift)
 
 if __name__ == "__main__":
     app = VisioDeckPlayer()
