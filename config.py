@@ -51,5 +51,5 @@ FFPROBE_PATH = resource_path("ffprobe.exe")
 LOGO_PATH = resource_path("logo_watermark.png")
 
 # --- ATUALIZAÇÕES ---
-CURRENT_VERSION = "19.23" 
+CURRENT_VERSION = "19.24" 
 UPDATE_JSON_URL = "https://raw.githubusercontent.com/gabriielgouvea/veritas-player/main/version.json"

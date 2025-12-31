@@ -1,5 +1,5 @@
 {
-    "version": "19.22",
-    "url_download": "https://github.com/gabriielgouvea/veritas-player/releases/download/v19.20/VeritasPlayer_Setup_v19.20.exe",
-    "changelog": "- Adicionado sistema de atualizações automáticas.\n- Removido controle manual de volume.\n- Melhorias de estabilidade no VLC."
+    "version": "19.24",
+    "url_download": "https://github.com/gabriielgouvea/veritas-player/releases/download/v19.24/VeritasPlayer_Setup_v19.24.exe",
+    "changelog": "- Correção de máscara de data (Fim) em Nova Propaganda.\n- Marca d’água no player com opção de imagem personalizada.\n- Ajustes no build do PyInstaller (plugins/assets)."
 }
