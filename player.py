@@ -218,6 +218,7 @@ class VisioDeckPlayer(ctk.CTk):
         # Preferências
         self.watermark_enabled = bool(get_app_setting("watermark_enabled", True))
         self.watermark_in_ads = bool(get_app_setting("watermark_in_ads", True))
+        self.watermark_position = str(get_app_setting("watermark_position", "bottom_left") or "bottom_left").lower().strip()
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)
@@ -327,13 +328,30 @@ class VisioDeckPlayer(ctk.CTk):
         # depois que a imagem carrega ou ao alternar fullscreen/DPI). Isso evita ficar "cortado".
         controls_h = 150 if getattr(self, "controls_on", False) else 0
 
-        align_right = str(WATERMARK_ALIGN).lower() == "right"
-        relx = 1.0 if align_right else 0.0
-        anchor = "se" if align_right else "sw"
-        x = -int(WATERMARK_MARGIN_X) if align_right else int(WATERMARK_MARGIN_X)
-        y = -int(WATERMARK_MARGIN_Y) - int(controls_h)
+        pos = str(getattr(self, "watermark_position", "") or "").lower().strip()
+        if not pos:
+            # Compatibilidade: se não houver setting, usa WATERMARK_ALIGN antigo
+            pos = "bottom_right" if str(WATERMARK_ALIGN).lower() == "right" else "bottom_left"
 
-        self.watermark_label.place(relx=relx, rely=1.0, x=x, y=y, anchor=anchor)
+        mx = int(WATERMARK_MARGIN_X)
+        my = int(WATERMARK_MARGIN_Y)
+
+        if pos == "bottom_left":
+            relx, rely, anchor, x, y = 0.0, 1.0, "sw", mx, -my - int(controls_h)
+        elif pos == "bottom_right":
+            relx, rely, anchor, x, y = 1.0, 1.0, "se", -mx, -my - int(controls_h)
+        elif pos == "top_left":
+            relx, rely, anchor, x, y = 0.0, 0.0, "nw", mx, my
+        elif pos == "top_right":
+            relx, rely, anchor, x, y = 1.0, 0.0, "ne", -mx, my
+        elif pos == "top_center":
+            relx, rely, anchor, x, y = 0.5, 0.0, "n", 0, my
+        elif pos == "bottom_center":
+            relx, rely, anchor, x, y = 0.5, 1.0, "s", 0, -my - int(controls_h)
+        else:
+            relx, rely, anchor, x, y = 0.0, 1.0, "sw", mx, -my - int(controls_h)
+
+        self.watermark_label.place(relx=relx, rely=rely, x=x, y=y, anchor=anchor)
         self.watermark_label.lift()
 
     def _load_watermark_ui_asset(self):
@@ -385,6 +403,11 @@ class VisioDeckPlayer(ctk.CTk):
         """Liga/desliga a marca d'água durante propagandas (não persiste; o Dashboard salva)."""
         self.watermark_in_ads = bool(enabled)
         self.configurar_watermark()
+
+    def set_watermark_position(self, position: str) -> None:
+        """Define a posição da marca d'água na UI (não persiste; o Dashboard salva)."""
+        self.watermark_position = str(position or "").lower().strip() or "bottom_left"
+        self._posicionar_watermark_ui()
 
     def tocar_audio_background(self, arquivo_audio):
         if not os.path.exists(arquivo_audio): return

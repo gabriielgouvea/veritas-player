@@ -963,6 +963,45 @@ class DashboardWindow(ctk.CTkToplevel):
             font=("Segoe UI", 13),
         ).pack(anchor="w", padx=25, pady=(0, 10))
 
+        # Posição da marca d'água
+        pos_options = {
+            "Inferior esquerda": "bottom_left",
+            "Inferior direita": "bottom_right",
+            "Superior esquerda": "top_left",
+            "Superior direita": "top_right",
+            "Meio em cima": "top_center",
+            "Meio em baixo": "bottom_center",
+        }
+        pos_reverse = {v: k for k, v in pos_options.items()}
+        current_pos = str(get_app_setting("watermark_position", "bottom_left") or "bottom_left")
+
+        ctk.CTkLabel(
+            card,
+            text="Posição da marca d'água:",
+            text_color="#333",
+            font=("Segoe UI", 13),
+        ).pack(anchor="w", padx=25, pady=(0, 6))
+
+        self.var_watermark_pos = tk.StringVar(value=pos_reverse.get(current_pos, "Inferior esquerda"))
+
+        def _on_change_watermark_pos(value):
+            pos_value = pos_options.get(value, "bottom_left")
+            set_app_setting("watermark_position", pos_value)
+            try:
+                self.player.set_watermark_position(pos_value)
+            except Exception:
+                pass
+
+        ctk.CTkOptionMenu(
+            card,
+            values=list(pos_options.keys()),
+            variable=self.var_watermark_pos,
+            command=_on_change_watermark_pos,
+            fg_color=VERITAS_BLUE,
+            button_color=VERITAS_BLUE,
+            button_hover_color=VERITAS_BLUE_HOVER,
+        ).pack(anchor="w", padx=25, pady=(0, 12))
+
         self.watermark_path_label = ctk.CTkLabel(card, text="Arquivo: ...", text_color="#777", font=("Segoe UI", 11))
         self.watermark_path_label.pack(anchor="w", padx=25, pady=(0, 10))
 
