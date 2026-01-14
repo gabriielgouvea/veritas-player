@@ -21,6 +21,7 @@ AppPublisher={#MyAppPublisher}
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 OutputBaseFilename=VeritasPlayer_Setup_v{#MyAppVersion}
+OutputDir=Output
 Compression=lzma
 SolidCompression=yes
 WizardStyle=modern

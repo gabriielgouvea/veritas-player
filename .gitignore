@@ -9,6 +9,10 @@ __pycache__/
 build/
 dist/
 *.spec
+build_new*/
+build_new2*/
+dist_new*/
+dist_new2*/
 
 # --- Arquivos Temporários do Locutor (Lixo) ---
 temp_*.mp3
@@ -33,4 +37,4 @@ media/
 *.mov
 Downloads_Youtube/
 Output/
-* .iss
+*.iss

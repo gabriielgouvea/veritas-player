@@ -120,14 +120,42 @@ if os.name == 'nt':
             app_dir = os.path.dirname(os.path.abspath(sys.executable))
         else:
             app_dir = os.getcwd()
-        dll_vlc = os.path.join(app_dir, 'libvlc.dll')
-        dll_core = os.path.join(app_dir, 'libvlccore.dll')
-        PLUGIN_PATH = os.path.join(app_dir, "plugins")
-        if not os.path.exists(dll_vlc):
-            try: ctypes.windll.user32.MessageBoxW(0, f"ARQUIVO SUMIU!\nNão achei: {dll_vlc}", "Erro Fatal", 0x10)
-            except: pass
-        os.add_dll_directory(app_dir)
-        os.environ['PYTHON_VLC_MODULE_PATH'] = app_dir
+
+        # No PyInstaller (one-folder), os binários e plugins podem ficar em _internal.
+        # Procura primeiro ao lado do .exe e depois em _internal.
+        candidates = [app_dir, os.path.join(app_dir, "_internal")]
+        vlc_base = None
+        for base in candidates:
+            if os.path.exists(os.path.join(base, 'libvlc.dll')):
+                vlc_base = base
+                break
+
+        if not vlc_base:
+            dll_vlc = os.path.join(app_dir, 'libvlc.dll')
+            try:
+                ctypes.windll.user32.MessageBoxW(0, f"ARQUIVO SUMIU!\nNão achei: {dll_vlc}\n\nDica: mantenha a pasta _internal junto do executável.", "Aviso", 0x30)
+            except:
+                pass
+            vlc_base = app_dir
+
+        dll_vlc = os.path.join(vlc_base, 'libvlc.dll')
+        dll_core = os.path.join(vlc_base, 'libvlccore.dll')
+        PLUGIN_PATH = os.path.join(vlc_base, "plugins")
+        if not os.path.isdir(PLUGIN_PATH):
+            PLUGIN_PATH = os.path.join(app_dir, "plugins")
+
+        # Garante que o loader do Windows encontre as DLLs do VLC.
+        try:
+            os.add_dll_directory(vlc_base)
+        except Exception:
+            pass
+        try:
+            if vlc_base != app_dir:
+                os.add_dll_directory(app_dir)
+        except Exception:
+            pass
+
+        os.environ['PYTHON_VLC_MODULE_PATH'] = vlc_base
         os.environ['VLC_PLUGIN_PATH'] = PLUGIN_PATH
         try:
             ctypes.CDLL(dll_core)

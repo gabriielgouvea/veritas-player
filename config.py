@@ -34,13 +34,27 @@ MSG_FILE = os.path.join(DATA_FOLDER, "mensagens_locutor.json")
 CONFIG_LOCUTOR = os.path.join(DATA_FOLDER, "config_locutor.json")
 
 # --- RECURSOS INTERNOS ---
+def app_dir() -> str:
+    """Diretório base do app (dev: cwd, empacotado: ao lado do .exe)."""
+    if getattr(sys, 'frozen', False):
+        return os.path.dirname(os.path.abspath(sys.executable))
+    return os.path.abspath(".")
+
 def resource_path(relative_path):
     """ Retorna caminho absoluto, funcionando para Dev e PyInstaller """
+    candidates = []
     try:
-        base_path = sys._MEIPASS
+        candidates.append(sys._MEIPASS)
     except Exception:
-        base_path = os.path.abspath(".")
-    return os.path.join(base_path, relative_path)
+        pass
+    candidates.append(app_dir())
+    candidates.append(os.path.abspath("."))
+
+    for base in candidates:
+        p = os.path.join(base, relative_path)
+        if os.path.exists(p):
+            return p
+    return os.path.join(candidates[0], relative_path)
 
 # Caminhos das Ferramentas
 FFMPEG_PATH = resource_path("ffmpeg.exe")

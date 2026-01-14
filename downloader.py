@@ -3,10 +3,18 @@ import customtkinter as ctk
 import threading
 import os
 import time
+import sys
+import traceback
+from datetime import datetime
 from tkinter import filedialog
 from yt_dlp import YoutubeDL
+from yt_dlp.utils import DownloadError
 from config import *
 from utils import ModernPopUp
+
+
+class DownloadCancelled(Exception):
+    pass
 
 class YoutubeDownloader(ctk.CTkFrame): # <-- AGORA É UM FRAME, NÃO UMA JANELA
     def __init__(self, parent, pasta_padrao):
@@ -70,6 +78,55 @@ class YoutubeDownloader(ctk.CTkFrame): # <-- AGORA É UM FRAME, NÃO UMA JANELA
         self.progress.set(0)
         
         self.btn_download = ctk.CTkButton(self, text="INICIAR DOWNLOAD", height=60, fg_color="#00C853", hover_color="#00A844", font=("Arial Black", 16), command=self.iniciar_download)
+
+        # Botão de cancelar (só aparece durante o download)
+        self._cancel_requested = False
+        self._last_download_files = set()
+        self.btn_cancel = ctk.CTkButton(
+            self,
+            text="PARAR DOWNLOAD",
+            height=50,
+            fg_color=VERITAS_DANGER,
+            hover_color="#D32F2F",
+            font=("Segoe UI", 14, "bold"),
+            command=self.cancelar_download,
+        )
+
+    def _download_log_path(self) -> str:
+        try:
+            base = DATA_FOLDER
+        except Exception:
+            base = os.getcwd()
+        return os.path.join(base, "youtube_download.log")
+
+    def _log_download(self, message: str) -> None:
+        try:
+            ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            with open(self._download_log_path(), "a", encoding="utf-8") as f:
+                f.write(f"[{ts}] {message}\n")
+        except Exception:
+            pass
+
+    def _get_ffmpeg_location(self) -> str | None:
+        # No modo empacotado, o ffmpeg fica ao lado do .exe (não necessariamente em _MEIPASS).
+        try:
+            if getattr(sys, 'frozen', False):
+                p = os.path.join(os.path.dirname(os.path.abspath(sys.executable)), "ffmpeg.exe")
+                if os.path.exists(p):
+                    return p
+        except Exception:
+            pass
+
+        try:
+            if os.path.exists(FFMPEG_PATH):
+                return FFMPEG_PATH
+        except Exception:
+            pass
+
+        p = os.path.join(os.getcwd(), "ffmpeg.exe")
+        if os.path.exists(p):
+            return p
+        return None
 
     def colar_link(self):
         try:
@@ -166,41 +223,114 @@ class YoutubeDownloader(ctk.CTkFrame): # <-- AGORA É UM FRAME, NÃO UMA JANELA
         self.lbl_status.configure(text="Erro ao buscar. Verifique o link.", text_color=VERITAS_DANGER)
 
     def iniciar_download(self):
+        if not self.video_info:
+            ModernPopUp(self, "Atenção", "Clique em ANALISAR VÍDEO antes de baixar.")
+            return
+
+        self._cancel_requested = False
+        self._last_download_files = set()
         qualidade_str = self.combo_quality.get()
         base = self.pasta_padrao if self.pasta_padrao else os.getcwd()
         
         self.btn_download.configure(state="disabled", text="BAIXANDO...")
         self.progress.pack(fill="x", padx=40, pady=10)
+
+        # Mostra o botão de cancelar apenas enquanto estiver baixando
+        self.btn_cancel.configure(state="normal")
+        self.btn_cancel.pack(fill="x", padx=40, pady=(0, 10))
         
         threading.Thread(target=self.thread_download, args=(self.video_info['webpage_url'], base, qualidade_str), daemon=True).start()
+
+    def cancelar_download(self):
+        # O cancelamento acontece na thread do yt-dlp via progress_hook
+        self._cancel_requested = True
+        try:
+            self.btn_cancel.configure(state="disabled", text="CANCELANDO...")
+        except Exception:
+            pass
+        try:
+            self.lbl_status.configure(text="Cancelando download...", text_color=VERITAS_DANGER)
+        except Exception:
+            pass
 
     def thread_download(self, link, base, qualidade_str):
         try:
             save_path = base 
             if not os.path.exists(save_path): os.makedirs(save_path)
 
+            ffmpeg_location = self._get_ffmpeg_location()
+            if not ffmpeg_location:
+                self._log_download("ffmpeg.exe não encontrado (nem ao lado do app, nem no cwd).")
+
             fmt = 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
             if "720p" in qualidade_str: fmt = 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]'
             if "480p" in qualidade_str: fmt = 'bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480][ext=mp4]'
             if "Áudio" in qualidade_str: fmt = 'bestaudio/best'
 
+            postprocessors = []
+            merge_output_format = "mp4"
+            if "Áudio" in qualidade_str:
+                # Converte para MP3 (a UI promete MP3).
+                merge_output_format = None
+                postprocessors = [
+                    {
+                        'key': 'FFmpegExtractAudio',
+                        'preferredcodec': 'mp3',
+                        'preferredquality': '192',
+                    }
+                ]
+
             ydl_opts = {
                 'format': fmt,
-                'outtmpl': f'{save_path}/%(title)s.%(ext)s',
+                'outtmpl': os.path.join(save_path, '%(title).200s [%(id)s].%(ext)s'),
                 'progress_hooks': [self.progress_hook],
                 'noplaylist': True,
+                'windowsfilenames': True,
+                'restrictfilenames': False,
+                'quiet': True,
+                'no_warnings': True,
             }
+
+            if ffmpeg_location:
+                ydl_opts['ffmpeg_location'] = ffmpeg_location
+
+            if merge_output_format:
+                ydl_opts['merge_output_format'] = merge_output_format
+
+            if postprocessors:
+                ydl_opts['postprocessors'] = postprocessors
+
+            self._log_download(f"Iniciando download: qualidade='{qualidade_str}', fmt='{fmt}', pasta='{save_path}', ffmpeg='{ffmpeg_location or 'N/A'}'")
 
             with YoutubeDL(ydl_opts) as ydl:
                 ydl.download([link])
             
             self.after(0, self.fim_sucesso)
             
+        except DownloadCancelled:
+            self.after(0, lambda: self.fim_cancelado(base))
+        except DownloadError as e:
+            self._log_download(f"DownloadError: {e}")
+            self._log_download(traceback.format_exc())
+            self.after(0, lambda: self.fim_erro(str(e)))
         except Exception as e:
+            self._log_download(f"Erro inesperado: {e}")
+            self._log_download(traceback.format_exc())
             self.after(0, lambda: self.fim_erro(str(e)))
 
     def progress_hook(self, d):
+        # Interrompe assim que o usuário pedir cancelamento
+        if self._cancel_requested:
+            raise DownloadCancelled("Cancelado pelo usuário")
+
         if d['status'] == 'downloading':
+            fn = d.get('filename')
+            tmp = d.get('tmpfilename')
+            if fn:
+                self._last_download_files.add(fn)
+            if tmp:
+                self._last_download_files.add(tmp)
+
             total = d.get('total_bytes') or d.get('total_bytes_estimate')
             downloaded = d.get('downloaded_bytes', 0)
             eta = d.get('eta'); speed = d.get('speed')
@@ -222,13 +352,58 @@ class YoutubeDownloader(ctk.CTkFrame): # <-- AGORA É UM FRAME, NÃO UMA JANELA
 
     def fim_sucesso(self):
         self.progress.pack_forget()
+        try:
+            self.btn_cancel.pack_forget()
+        except Exception:
+            pass
         self.btn_download.configure(state="normal", text="BAIXAR OUTRO", fg_color=VERITAS_BLUE)
         self.lbl_status.configure(text="Download Concluído com Sucesso!", text_color="green")
         self.entry_link.delete(0, "end")
         ModernPopUp(self, "Sucesso", "Vídeo salvo!")
 
+    def fim_cancelado(self, base_path):
+        self.progress.pack_forget()
+        try:
+            self.btn_cancel.pack_forget()
+        except Exception:
+            pass
+        self.btn_download.configure(state="normal", text="INICIAR DOWNLOAD", fg_color="#00C853")
+        self.lbl_status.configure(text="Download cancelado.", text_color=VERITAS_DANGER)
+
+        # Tenta remover arquivos parciais (.part/tmp) mais prováveis
+        try:
+            for p in list(self._last_download_files):
+                if p and os.path.exists(p):
+                    try:
+                        os.remove(p)
+                    except Exception:
+                        pass
+
+            # Remove sobras comuns na pasta destino
+            for fn in os.listdir(base_path):
+                if fn.endswith('.part') or fn.endswith('.ytdl'):
+                    try:
+                        os.remove(os.path.join(base_path, fn))
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+        ModernPopUp(self, "Cancelado", "O download foi cancelado.")
+
     def fim_erro(self, msg):
         self.progress.pack_forget()
+        try:
+            self.btn_cancel.pack_forget()
+        except Exception:
+            pass
         self.btn_download.configure(state="normal", text="TENTAR NOVAMENTE")
         self.lbl_status.configure(text="Erro no Download", text_color=VERITAS_DANGER)
-        print(msg)
+        resumo = (msg or "Erro desconhecido").strip()
+        if len(resumo) > 800:
+            resumo = resumo[:800] + "..."
+        ModernPopUp(
+            self,
+            "Erro no Download",
+            f"{resumo}\n\nDetalhes em: {self._download_log_path()}",
+        )

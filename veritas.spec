@@ -1,6 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all
 import os
+import sys
 
 block_cipher = None
 
@@ -48,6 +49,15 @@ added_files = [
     ('libvlc.dll', '.'),
     ('libvlccore.dll', '.'),
 ]
+
+# --- RUNTIME VC++ (Python 3.11) ---
+# Em algumas máquinas sem Python instalado, o python311.dll depende de VCRUNTIME140_1.dll.
+try:
+    vcr_1 = os.path.join(sys.base_prefix, 'vcruntime140_1.dll')
+    if os.path.exists(vcr_1):
+        added_files.append((vcr_1, '.'))
+except Exception:
+    pass
 
 # Adiciona os binários à lista
 for src, dest in added_files:
