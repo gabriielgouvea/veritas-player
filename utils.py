@@ -7,6 +7,7 @@ import urllib.request
 import webbrowser
 import time
 import random
+from datetime import datetime
 from config import *
 
 # --- FERRAMENTAS DE INTERFACE ---
@@ -169,6 +170,49 @@ def abrir_link_download(url):
     print(f"Abrindo link: {url}")
     if url:
         webbrowser.open(url)
+
+
+def _parse_iso_datetime(s: str) -> datetime:
+    # Suporta 'Z' e offsets. Ex.: 2026-01-14T16:58:26.123456-03:00
+    s = (s or "").strip()
+    if not s:
+        raise ValueError("datetime vazio")
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    return datetime.fromisoformat(s)
+
+
+def obter_horario_brasilia(timeout: int = 4) -> datetime:
+    """Retorna um datetime (timezone-aware) do horário de Brasília.
+
+    Usa APIs públicas com fallback. Lança exceção se não conseguir.
+    """
+    urls = [
+        "http://worldtimeapi.org/api/timezone/America/Sao_Paulo",
+        "https://timeapi.io/api/Time/current/zone?timeZone=America/Sao_Paulo",
+    ]
+
+    last_err = None
+    for url in urls:
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=timeout) as response:
+                raw = response.read().decode("utf-8", errors="replace")
+            data = json.loads(raw)
+
+            # worldtimeapi
+            if isinstance(data, dict) and data.get("datetime"):
+                return _parse_iso_datetime(data["datetime"])
+
+            # timeapi.io
+            if isinstance(data, dict) and data.get("dateTime"):
+                return _parse_iso_datetime(data["dateTime"])
+
+            raise ValueError("Resposta inesperada")
+        except Exception as e:
+            last_err = e
+
+    raise RuntimeError(f"Falha ao obter horário de Brasília: {last_err}")
 
 
 # --- PREFERÊNCIAS DO APP (AppData) ---

@@ -217,6 +217,7 @@ class VisioDeckPlayer(ctk.CTk):
 
         # Preferências
         self.watermark_enabled = bool(get_app_setting("watermark_enabled", True))
+        self.watermark_in_ads = bool(get_app_setting("watermark_in_ads", True))
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)
@@ -287,9 +288,15 @@ class VisioDeckPlayer(ctk.CTk):
     def configuring_watermark(self):
         self.configurar_watermark()
 
+    def _watermark_effective_enabled(self) -> bool:
+        enabled = bool(getattr(self, "watermark_enabled", True))
+        if getattr(self, "modo_ad", False) and not bool(getattr(self, "watermark_in_ads", True)):
+            enabled = False
+        return enabled
+
     def configurar_watermark(self):
-        # Se desativado pelo usuário, esconde o overlay e não faz mais nada.
-        if not getattr(self, "watermark_enabled", True):
+        # Se desativado (geral ou por ser propaganda), esconde o overlay e não faz mais nada.
+        if not self._watermark_effective_enabled():
             if self.watermark_label is not None:
                 try:
                     self.watermark_label.place_forget()
@@ -313,7 +320,7 @@ class VisioDeckPlayer(ctk.CTk):
             pass
 
     def _posicionar_watermark_ui(self):
-        if (not WATERMARK_UI_ENABLED) or (not self.watermark_label) or (not getattr(self, "watermark_enabled", True)):
+        if (not WATERMARK_UI_ENABLED) or (not self.watermark_label) or (not self._watermark_effective_enabled()):
             return
 
         # Usa posicionamento relativo para não depender do tamanho "reqwidth" (que pode mudar
@@ -330,7 +337,7 @@ class VisioDeckPlayer(ctk.CTk):
         self.watermark_label.lift()
 
     def _load_watermark_ui_asset(self):
-        if (not WATERMARK_UI_ENABLED) or (not self.watermark_label) or (not getattr(self, "watermark_enabled", True)):
+        if (not WATERMARK_UI_ENABLED) or (not self.watermark_label) or (not self._watermark_effective_enabled()):
             return
 
         img_path = _find_watermark_ui_image_path()
@@ -372,6 +379,11 @@ class VisioDeckPlayer(ctk.CTk):
     def set_watermark_enabled(self, enabled: bool) -> None:
         """Liga/desliga a marca d'água em tempo real (não persiste; o Dashboard salva)."""
         self.watermark_enabled = bool(enabled)
+        self.configurar_watermark()
+
+    def set_watermark_in_ads(self, enabled: bool) -> None:
+        """Liga/desliga a marca d'água durante propagandas (não persiste; o Dashboard salva)."""
+        self.watermark_in_ads = bool(enabled)
         self.configurar_watermark()
 
     def tocar_audio_background(self, arquivo_audio):
@@ -513,19 +525,38 @@ class VisioDeckPlayer(ctk.CTk):
     
     def sys_loop(self):
         hoje = datetime.now().strftime("%d/%m/%Y")
-        if hoje != self.data_cache:
-            self.data_cache = hoje
-            try:
-                with open(DB_FILE,'r') as f: d = json.load(f)
-                for c in d: c["execucoes_hoje"] = []
-                with open(DB_FILE,'w') as f: json.dump(d,f,indent=4)
-            except: pass
         agora_ts = time.time()
         if not self.modo_ad and not self.modo_tts and (agora_ts - self.last_ad_timestamp) > 60:
             if os.path.exists(DB_FILE):
                 now = datetime.now(); hora = now.strftime("%H:%M"); wd = ["seg","ter","qua","qui","sex","sab","dom"][now.weekday()]
                 try:
                     with open(DB_FILE,'r') as f: cons = json.load(f)
+                    reset_changed = False
+                    try:
+                        db_mtime_date = datetime.fromtimestamp(os.path.getmtime(DB_FILE)).strftime("%d/%m/%Y")
+                    except Exception:
+                        db_mtime_date = None
+
+                    # Garante reset diário mesmo após reiniciar o app.
+                    # Compatibilidade: se ainda não existir "data_execucoes", usa a data do mtime do arquivo
+                    # para decidir se preserva (quando o DB foi mexido hoje) ou zera (DB antigo).
+                    for c in cons:
+                        last_date = c.get("data_execucoes")
+                        if not last_date:
+                            # Cria a chave e persiste no arquivo para evitar depender de mtime.
+                            if db_mtime_date == hoje:
+                                c["data_execucoes"] = hoje
+                                if "execucoes_hoje" not in c:
+                                    c["execucoes_hoje"] = []
+                                reset_changed = True
+                            else:
+                                c["data_execucoes"] = hoje
+                                c["execucoes_hoje"] = []
+                                reset_changed = True
+                        elif last_date != hoje:
+                            c["data_execucoes"] = hoje
+                            c["execucoes_hoje"] = []
+                            reset_changed = True
                     sv = False
                     for c in cons:
                         if not c.get("ativo") or not c.get("inicio"): continue
@@ -549,7 +580,7 @@ class VisioDeckPlayer(ctk.CTk):
                                     if tipo == "AUDIO": self.tocar_audio_background(c["video"])
                                     else: self.mem_time = self.player.get_time(); self.play_video(c["video"], ad=True)
                                     break
-                    if sv:
+                    if reset_changed or sv:
                         with open(DB_FILE,'w') as f:
                             json.dump(cons,f,indent=4)
                 except: pass

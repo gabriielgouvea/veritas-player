@@ -8,11 +8,11 @@ import edge_tts
 import subprocess 
 import sys
 import shutil
-from datetime import datetime
+from datetime import datetime, timedelta
 from tkinter import filedialog
 from config import *
 import tkinter as tk
-from utils import ModernPopUp, carregar_db, salvar_db, garantir_alerta_sonoro, verificar_updates, abrir_link_download, get_app_setting, set_app_setting
+from utils import ModernPopUp, carregar_db, salvar_db, garantir_alerta_sonoro, verificar_updates, abrir_link_download, get_app_setting, set_app_setting, obter_horario_brasilia
 from downloader import YoutubeDownloader
 from PIL import Image
 
@@ -41,6 +41,13 @@ class DashboardWindow(ctk.CTkToplevel):
         self.l_hours = []
         self.l_dates = []
         self.vid_path = ""
+
+        # Jobs/estado de UI
+        self._br_clock_job = None
+        self._br_base_dt = None
+        self._br_base_mono = None
+        self._br_warning_shown = False
+        self._dias_backup = None
         
         # --- SIDEBAR ---
         self.sidebar = ctk.CTkFrame(self, width=260, corner_radius=0, fg_color="white")
@@ -84,6 +91,13 @@ class DashboardWindow(ctk.CTkToplevel):
         self.btn_dict[name] = btn
 
     def show_view(self, view_name):
+        # Cancela timers/updates de telas anteriores (ex.: relógio de Brasília)
+        try:
+            if getattr(self, "_br_clock_job", None):
+                self.after_cancel(self._br_clock_job)
+        except Exception:
+            pass
+        self._br_clock_job = None
         for n, b in self.btn_dict.items(): 
             if n == view_name: b.configure(fg_color="#E3F2FD", text_color=VERITAS_BLUE)
             else: b.configure(fg_color="transparent", text_color="#555")
@@ -325,6 +339,20 @@ class DashboardWindow(ctk.CTkToplevel):
         self.header("Editar Propaganda" if self.editando_id else "Nova Propaganda", "Preencha os dados.")
         f = ctk.CTkScrollableFrame(self.main_area, fg_color="transparent")
         f.pack(fill="both", expand=True)
+
+        # --- Card de relógio (Brasília x PC) ---
+        self.card_form(f, "Data e Hora")
+        time_card = ctk.CTkFrame(self.last_card, fg_color="transparent")
+        time_card.pack(fill="x", padx=20, pady=(5, 15))
+        self.lbl_pc_time = ctk.CTkLabel(time_card, text="Horário do PC: ...", text_color="#555", font=("Consolas", 12, "bold"))
+        self.lbl_pc_time.pack(anchor="w")
+        self.lbl_br_time = ctk.CTkLabel(time_card, text="Horário de Brasília: buscando...", text_color="#555", font=("Consolas", 12, "bold"))
+        self.lbl_br_time.pack(anchor="w", pady=(3, 0))
+        self.lbl_time_warn = ctk.CTkLabel(time_card, text="", text_color="#999", font=("Segoe UI", 11))
+        self.lbl_time_warn.pack(anchor="w", pady=(6, 0))
+
+        self._start_brasilia_clock()
+
         self.card_form(f, "Dados Gerais")
         fr = ctk.CTkFrame(self.last_card, fg_color="transparent")
         fr.pack(fill="x", padx=20, pady=10)
@@ -388,12 +416,14 @@ class DashboardWindow(ctk.CTkToplevel):
         fs.pack(fill="x")
         self.d_vars = {}
         self.chk_dias = []
+        self.chk_dias_by_name = {}
         for d_name in ["seg","ter","qua","qui","sex","sab","dom"]: 
             v = ctk.BooleanVar(value=True)
             self.d_vars[d_name]=v
             c = ctk.CTkCheckBox(fs, text=d_name.upper(), variable=v, width=60, text_color="#555", checkmark_color=VERITAS_BLUE, command=self.logic_sem)
             c.pack(side="left", padx=5)
             self.chk_dias.append(c)
+            self.chk_dias_by_name[d_name] = c
             
         t2 = self.tabs.tab("DATA ÚNICA")
         fdt = ctk.CTkFrame(t2, fg_color="transparent")
@@ -428,6 +458,8 @@ class DashboardWindow(ctk.CTkToplevel):
         self.smart_date()
         if self.editando_id and d: self.preencher(d)
         self.mudar_tipo_midia()
+        # Garante UI consistente ao abrir edição/criação
+        self._apply_somente_hoje_ui()
 
     def mudar_tipo_midia(self, v=None):
         t = self.var_tipo.get()
@@ -463,13 +495,22 @@ class DashboardWindow(ctk.CTkToplevel):
             "dias": [d for d, v in self.d_vars.items() if v.get()], 
             "somente_hoje": self.v_hoje.get(), 
             "datas_especificas": self.l_dates, 
-            "execucoes_hoje": [] 
+            "execucoes_hoje": [],
+            "data_execucoes": datetime.now().strftime("%d/%m/%Y"),
         }
         
         if self.editando_id:
             for i, x in enumerate(self.contratos):
                 if str(x["id"]) == str(self.editando_id): 
-                    c["execucoes_hoje"] = x.get("execucoes_hoje",[])
+                    # Mantém execuções do dia apenas para horários ainda válidos.
+                    old_exec = x.get("execucoes_hoje", [])
+                    try:
+                        c["execucoes_hoje"] = [h for h in old_exec if h in c.get("horarios", [])]
+                    except Exception:
+                        c["execucoes_hoje"] = []
+                    # Preserva a data de execuções se existir.
+                    if x.get("data_execucoes"):
+                        c["data_execucoes"] = x.get("data_execucoes")
                     self.contratos[i] = c
                     break
         else: 
@@ -516,7 +557,9 @@ class DashboardWindow(ctk.CTkToplevel):
             ini = datetime.strptime(self.e_ini.get(), "%d/%m/%Y").date()
             hoje = datetime.now().date()
             if ini > hoje: 
-                self.v_hoje.set(False)
+                if self.v_hoje.get():
+                    self.v_hoje.set(False)
+                    self._dias_backup = None
                 self.chk_hoje.configure(state="disabled")
             else: 
                 self.chk_hoje.configure(state="normal")
@@ -537,6 +580,11 @@ class DashboardWindow(ctk.CTkToplevel):
     
     def logic_hoje(self):
         if self.v_hoje.get(): 
+            # Backup dos dias atuais para restaurar quando desmarcar
+            try:
+                self._dias_backup = [d for d, v in self.d_vars.items() if v.get()]
+            except Exception:
+                self._dias_backup = None
             h = datetime.now().strftime("%d/%m/%Y")
             self.e_ini.delete(0,"end")
             self.e_ini.insert(0,h)
@@ -546,7 +594,10 @@ class DashboardWindow(ctk.CTkToplevel):
             self.v_indet.set(False)
             self.chk_indet.configure(state="normal")
             self.smart_date()
-        else: self.smart_date()
+            self._apply_somente_hoje_ui()
+        else:
+            self._apply_somente_hoje_ui()
+            self.smart_date()
     
     def logic_indet(self):
         if self.v_indet.get(): 
@@ -561,7 +612,110 @@ class DashboardWindow(ctk.CTkToplevel):
             self.chk_hoje.configure(state="normal")
     
     def logic_sem(self):
-        if self.v_hoje.get(): self.v_hoje.set(False); self.logic_hoje()
+        # Se o usuário mexer nos dias da semana, "Somente hoje" deve sair.
+        if self.v_hoje.get():
+            self.v_hoje.set(False)
+            self.logic_hoje()
+
+    def _apply_somente_hoje_ui(self):
+        """Quando 'Somente hoje' está ativo: trava dias da semana e marca só o dia atual."""
+        if not getattr(self, "chk_dias", None) or not getattr(self, "d_vars", None):
+            return
+
+        if self.v_hoje.get():
+            hoje_key = ["seg","ter","qua","qui","sex","sab","dom"][datetime.now().weekday()]
+            for d, v in self.d_vars.items():
+                v.set(d == hoje_key)
+            for chk in self.chk_dias:
+                try:
+                    chk.configure(state="disabled")
+                except Exception:
+                    pass
+        else:
+            for chk in self.chk_dias:
+                try:
+                    chk.configure(state="normal")
+                except Exception:
+                    pass
+            if self._dias_backup is not None:
+                for d, v in self.d_vars.items():
+                    v.set(d in self._dias_backup)
+                self._dias_backup = None
+
+    def _start_brasilia_clock(self):
+        """Mostra horário de Brasília e alerta se o PC estiver divergente."""
+        self._br_warning_shown = False
+        self._br_base_dt = None
+        self._br_base_mono = None
+
+        def _fetch():
+            try:
+                br_dt = obter_horario_brasilia(timeout=4)
+            except Exception:
+                br_dt = None
+
+            def _apply():
+                if not getattr(self, "lbl_br_time", None):
+                    return
+                if br_dt is None:
+                    self.lbl_br_time.configure(text="Horário de Brasília: indisponível (sem internet)")
+                else:
+                    self._br_base_dt = br_dt
+                    self._br_base_mono = time.monotonic()
+                self._tick_brasilia_clock()
+
+            try:
+                self.after(0, _apply)
+            except Exception:
+                pass
+
+        threading.Thread(target=_fetch, daemon=True).start()
+
+    def _tick_brasilia_clock(self):
+        # PC (o que o sistema usa para executar horários)
+        try:
+            pc_now = datetime.now()
+            if getattr(self, "lbl_pc_time", None):
+                self.lbl_pc_time.configure(text=f"Horário do PC: {pc_now.strftime('%d/%m/%Y %H:%M:%S')}")
+        except Exception:
+            pc_now = None
+
+        # Brasília (se disponível)
+        br_now = None
+        if getattr(self, "_br_base_dt", None) is not None and getattr(self, "_br_base_mono", None) is not None:
+            try:
+                elapsed = max(0.0, float(time.monotonic() - float(self._br_base_mono)))
+                br_now = self._br_base_dt + timedelta(seconds=int(elapsed))
+                if getattr(self, "lbl_br_time", None):
+                    self.lbl_br_time.configure(text=f"Horário de Brasília: {br_now.strftime('%d/%m/%Y %H:%M:%S')}")
+            except Exception:
+                br_now = None
+
+        # Aviso de divergência
+        if getattr(self, "lbl_time_warn", None):
+            if pc_now is not None and br_now is not None:
+                try:
+                    diff_s = abs(int((br_now.replace(tzinfo=None) - pc_now).total_seconds()))
+                    if diff_s >= 120:
+                        mins = max(1, diff_s // 60)
+                        self.lbl_time_warn.configure(
+                            text=f"⚠️ Atenção: horário do PC difere do horário de Brasília (~{mins} min). Corrija data/hora/fuso do Windows.",
+                            text_color=VERITAS_DANGER,
+                        )
+                        if not self._br_warning_shown:
+                            self._br_warning_shown = True
+                            ModernPopUp(self, "Horário divergente", "O horário/data do PC está diferente do horário de Brasília.\n\nIsso pode fazer as propagandas rodarem fora do horário.\n\nCorrija o fuso horário (Brasília) e a sincronização automática do Windows.")
+                    else:
+                        self.lbl_time_warn.configure(text="✅ Horário do PC alinhado com Brasília.", text_color="#2E7D32")
+                except Exception:
+                    self.lbl_time_warn.configure(text="", text_color="#999")
+            else:
+                self.lbl_time_warn.configure(text="", text_color="#999")
+
+        try:
+            self._br_clock_job = self.after(1000, self._tick_brasilia_clock)
+        except Exception:
+            self._br_clock_job = None
 
     def header(self, t, s): 
         ctk.CTkLabel(self.main_area, text=t, font=("Segoe UI", 26, "bold"), text_color=VERITAS_TEXT).pack(anchor="w")
@@ -601,7 +755,30 @@ class DashboardWindow(ctk.CTkToplevel):
         w.delete(0, "end")
         w.insert(0, out)
     
-    def add_hr(self, e=None): self._tag(self.e_hr, self.l_hours, self.fr_hr, self.rm_hr, 5)
+    def add_hr(self, e=None):
+        v = self.e_hr.get()
+        if len(v) != 5:
+            return
+        try:
+            hh = int(v[:2]); mm = int(v[3:])
+            if v[2] != ":":
+                return
+            if hh < 0 or hh > 23 or mm < 0 or mm > 59:
+                return
+        except Exception:
+            return
+
+        # Se for "Somente hoje", não permite horário no passado (senão nunca roda).
+        if getattr(self, "v_hoje", None) is not None and self.v_hoje.get():
+            try:
+                now = datetime.now()
+                if (hh, mm) <= (now.hour, now.minute):
+                    ModernPopUp(self, "Horário inválido", "Para 'SOMENTE HOJE', escolha um horário futuro (maior que o horário atual).")
+                    return
+            except Exception:
+                pass
+
+        self._tag(self.e_hr, self.l_hours, self.fr_hr, self.rm_hr, 5)
     def add_dt(self, e=None): self._tag(self.e_dt, self.l_dates, self.fr_dt, self.rm_dt, 10)
     
     def _tag(self, e, l, p, cb, ln): 
@@ -738,6 +915,7 @@ class DashboardWindow(ctk.CTkToplevel):
         ctk.CTkLabel(card, text="Configurações", font=("Segoe UI", 14, "bold"), text_color=VERITAS_BLUE).pack(anchor="w", padx=25, pady=(15, 5))
 
         self.var_watermark = tk.BooleanVar(value=bool(get_app_setting("watermark_enabled", True)))
+        self.var_watermark_ads = tk.BooleanVar(value=bool(get_app_setting("watermark_in_ads", True)))
 
         def _on_toggle_watermark():
             enabled = bool(self.var_watermark.get())
@@ -759,6 +937,31 @@ class DashboardWindow(ctk.CTkToplevel):
             text_color="#333",
             font=("Segoe UI", 13),
         ).pack(anchor="w", padx=25, pady=(5, 10))
+
+        def _on_toggle_watermark_ads():
+            enabled = bool(self.var_watermark_ads.get())
+            set_app_setting("watermark_in_ads", enabled)
+            try:
+                self.player.set_watermark_in_ads(enabled)
+            except Exception:
+                try:
+                    self.player.watermark_in_ads = enabled
+                    self.player.configurar_watermark()
+                except Exception:
+                    pass
+
+        ctk.CTkCheckBox(
+            card,
+            text="Manter marca d'água em propagandas",
+            variable=self.var_watermark_ads,
+            command=_on_toggle_watermark_ads,
+            onvalue=True,
+            offvalue=False,
+            fg_color=VERITAS_BLUE,
+            hover_color=VERITAS_BLUE_HOVER,
+            text_color="#333",
+            font=("Segoe UI", 13),
+        ).pack(anchor="w", padx=25, pady=(0, 10))
 
         self.watermark_path_label = ctk.CTkLabel(card, text="Arquivo: ...", text_color="#777", font=("Segoe UI", 11))
         self.watermark_path_label.pack(anchor="w", padx=25, pady=(0, 10))
