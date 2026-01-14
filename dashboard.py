@@ -10,7 +10,8 @@ import sys
 from datetime import datetime
 from tkinter import filedialog
 from config import *
-from utils import ModernPopUp, carregar_db, salvar_db, garantir_alerta_sonoro, verificar_updates, abrir_link_download
+import tkinter as tk
+from utils import ModernPopUp, carregar_db, salvar_db, garantir_alerta_sonoro, verificar_updates, abrir_link_download, get_app_setting, set_app_setting
 from downloader import YoutubeDownloader
 
 # --- LOGGING ---
@@ -665,6 +666,34 @@ class DashboardWindow(ctk.CTkToplevel):
         self.combo_play = ctk.CTkComboBox(card2, values=[], width=300, height=40, state="readonly", command=self.change_playlist)
         self.combo_play.pack(anchor="w", padx=25)
         self.refresh_config_data()
+
+        # --- NOVO: Marca d'água (watermark.png) ---
+        card3 = ctk.CTkFrame(self.main_area, fg_color="white", corner_radius=10)
+        card3.pack(fill="x", pady=10, ipady=15)
+        ctk.CTkLabel(card3, text="Exibição", font=("Segoe UI", 14, "bold"), text_color=VERITAS_BLUE).pack(anchor="w", padx=25, pady=(15, 5))
+
+        self.var_watermark = tk.BooleanVar(value=bool(get_app_setting("watermark_enabled", True)))
+
+        def _on_toggle_watermark():
+            enabled = bool(self.var_watermark.get())
+            set_app_setting("watermark_enabled", enabled)
+            try:
+                self.player.set_watermark_enabled(enabled)
+            except Exception:
+                pass
+
+        ctk.CTkCheckBox(
+            card3,
+            text="Marca d'água (watermark.png)",
+            variable=self.var_watermark,
+            command=_on_toggle_watermark,
+            onvalue=True,
+            offvalue=False,
+            fg_color=VERITAS_BLUE,
+            hover_color=VERITAS_BLUE_HOVER,
+            text_color="#333",
+            font=("Segoe UI", 13),
+        ).pack(anchor="w", padx=25, pady=(5, 15))
 
     def select_root(self):
         p = filedialog.askdirectory(parent=self)

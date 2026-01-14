@@ -169,3 +169,38 @@ def abrir_link_download(url):
     print(f"Abrindo link: {url}")
     if url:
         webbrowser.open(url)
+
+
+# --- PREFERÊNCIAS DO APP (AppData) ---
+def carregar_app_settings():
+    """Carrega preferências do app (AppData). Retorna dict vazio se não existir."""
+    try:
+        if os.path.exists(APP_SETTINGS_FILE):
+            with open(APP_SETTINGS_FILE, "r", encoding="utf-8") as f:
+                d = json.load(f)
+                return d if isinstance(d, dict) else {}
+    except Exception:
+        pass
+    return {}
+
+
+def salvar_app_settings(dados: dict) -> None:
+    """Salva preferências do app (AppData)."""
+    try:
+        os.makedirs(os.path.dirname(APP_SETTINGS_FILE), exist_ok=True)
+    except Exception:
+        pass
+    with open(APP_SETTINGS_FILE, "w", encoding="utf-8") as f:
+        json.dump(dados, f, indent=4, ensure_ascii=False)
+
+
+def get_app_setting(chave: str, padrao=None):
+    d = carregar_app_settings()
+    return d.get(chave, padrao)
+
+
+def set_app_setting(chave: str, valor) -> dict:
+    d = carregar_app_settings()
+    d[chave] = valor
+    salvar_app_settings(d)
+    return d

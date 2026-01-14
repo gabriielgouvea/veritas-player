@@ -11,7 +11,7 @@ import pyautogui
 from datetime import datetime
 from PIL import Image, ImageDraw, ImageFont
 from config import *
-from utils import ToolTip, carregar_db, salvar_db
+from utils import ToolTip, carregar_db, salvar_db, get_app_setting
 from dashboard import DashboardWindow
 
 # Marca d'água (PNG) por cima do vídeo (VLC logo overlay)
@@ -204,6 +204,9 @@ class VisioDeckPlayer(ctk.CTk):
         self.hide_task = None
         self.last_ad_timestamp = 0
 
+        # Preferências
+        self.watermark_enabled = bool(get_app_setting("watermark_enabled", True))
+
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(0, weight=1)
         self.video_frame = tk.Frame(self, bg="black")
@@ -274,6 +277,19 @@ class VisioDeckPlayer(ctk.CTk):
         self.configurar_watermark()
 
     def configurar_watermark(self):
+        # Se desativado pelo usuário, esconde o overlay e não faz mais nada.
+        if not getattr(self, "watermark_enabled", True):
+            if self.watermark_label is not None:
+                try:
+                    self.watermark_label.place_forget()
+                except Exception:
+                    pass
+            try:
+                self.player.video_set_logo_int(vlc.VideoLogoOption.logo_enable.value, 0)
+            except Exception:
+                pass
+            return
+
         # 1) Watermark na UI (preferida: canto da tela)
         if WATERMARK_UI_ENABLED:
             self._load_watermark_ui_asset()
@@ -286,7 +302,7 @@ class VisioDeckPlayer(ctk.CTk):
             pass
 
     def _posicionar_watermark_ui(self):
-        if not WATERMARK_UI_ENABLED or not self.watermark_label:
+        if (not WATERMARK_UI_ENABLED) or (not self.watermark_label) or (not getattr(self, "watermark_enabled", True)):
             return
 
         # Usa posicionamento relativo para não depender do tamanho "reqwidth" (que pode mudar
@@ -303,7 +319,7 @@ class VisioDeckPlayer(ctk.CTk):
         self.watermark_label.lift()
 
     def _load_watermark_ui_asset(self):
-        if not WATERMARK_UI_ENABLED or not self.watermark_label:
+        if (not WATERMARK_UI_ENABLED) or (not self.watermark_label) or (not getattr(self, "watermark_enabled", True)):
             return
 
         img_path = _find_watermark_ui_image_path()
@@ -341,6 +357,11 @@ class VisioDeckPlayer(ctk.CTk):
             corner_radius=WATERMARK_UI_CORNER_RADIUS,
         )
         self.after_idle(self._posicionar_watermark_ui)
+
+    def set_watermark_enabled(self, enabled: bool) -> None:
+        """Liga/desliga a marca d'água em tempo real (não persiste; o Dashboard salva)."""
+        self.watermark_enabled = bool(enabled)
+        self.configurar_watermark()
 
     def tocar_audio_background(self, arquivo_audio):
         if not os.path.exists(arquivo_audio): return

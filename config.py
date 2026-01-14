@@ -33,6 +33,10 @@ LAST_PATHS_FILE = os.path.join(DATA_FOLDER, "last_paths.txt")
 MSG_FILE = os.path.join(DATA_FOLDER, "mensagens_locutor.json")
 CONFIG_LOCUTOR = os.path.join(DATA_FOLDER, "config_locutor.json")
 
+# --- PREFERÊNCIAS DO APP ---
+# Guardamos opções simples (ex.: marca d'água ligada/desligada)
+APP_SETTINGS_FILE = os.path.join(DATA_FOLDER, "app_settings.json")
+
 # --- RECURSOS INTERNOS ---
 def app_dir() -> str:
     """Diretório base do app (dev: cwd, empacotado: ao lado do .exe)."""
