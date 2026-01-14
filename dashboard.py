@@ -7,12 +7,14 @@ import asyncio
 import edge_tts 
 import subprocess 
 import sys
+import shutil
 from datetime import datetime
 from tkinter import filedialog
 from config import *
 import tkinter as tk
 from utils import ModernPopUp, carregar_db, salvar_db, garantir_alerta_sonoro, verificar_updates, abrir_link_download, get_app_setting, set_app_setting
 from downloader import YoutubeDownloader
+from PIL import Image
 
 # --- LOGGING ---
 def log(msg):
@@ -49,6 +51,7 @@ class DashboardWindow(ctk.CTkToplevel):
         
         self.btn_dict = {}
         self.create_menu_btn("🏠  Configuração Inicial", "config")
+        self.create_menu_btn("🖼️  Marca d'água", "watermark")
         self.create_menu_btn("📋  Propagandas Ativas", "list")
         self.create_menu_btn("➕  Nova Propaganda", "create")
         self.create_menu_btn("📢  Locutor (TTS)", "locutor") 
@@ -87,6 +90,7 @@ class DashboardWindow(ctk.CTkToplevel):
         for widget in self.main_area.winfo_children(): widget.destroy()
         
         if view_name == "config": self.render_config()
+        elif view_name == "watermark": self.render_watermark()
         elif view_name == "list": self.render_ad_list()
         elif view_name == "create": self.render_ad_create()
         elif view_name == "locutor": self.render_locutor()
@@ -667,10 +671,71 @@ class DashboardWindow(ctk.CTkToplevel):
         self.combo_play.pack(anchor="w", padx=25)
         self.refresh_config_data()
 
-        # --- NOVO: Marca d'água (watermark.png) ---
-        card3 = ctk.CTkFrame(self.main_area, fg_color="white", corner_radius=10)
-        card3.pack(fill="x", pady=10, ipady=15)
-        ctk.CTkLabel(card3, text="Exibição", font=("Segoe UI", 14, "bold"), text_color=VERITAS_BLUE).pack(anchor="w", padx=25, pady=(15, 5))
+    def _watermark_user_path(self) -> str:
+        return os.path.join(DATA_FOLDER, "watermark.png")
+
+    def _find_current_watermark_path(self) -> str | None:
+        # Prioridade: arquivo do usuário (AppData) > arquivo do projeto/exe > recursos empacotados
+        candidates = [
+            self._watermark_user_path(),
+            os.path.join(app_dir(), "watermark.png"),
+            os.path.join(app_dir(), "logo_watermark.png"),
+        ]
+        for p in candidates:
+            if p and os.path.exists(p):
+                return p
+        try:
+            rp = resource_path("watermark.png")
+            if os.path.exists(rp):
+                return rp
+        except Exception:
+            pass
+        try:
+            rp = resource_path("logo_watermark.png")
+            if os.path.exists(rp):
+                return rp
+        except Exception:
+            pass
+        return None
+
+    def _update_watermark_preview(self):
+        if not getattr(self, "watermark_preview", None):
+            return
+        p = self._find_current_watermark_path()
+        if not p:
+            self.watermark_preview_img = None
+            self.watermark_preview.configure(text="Nenhuma imagem encontrada.", image=None)
+            if getattr(self, "watermark_path_label", None):
+                self.watermark_path_label.configure(text="Arquivo: (não encontrado)")
+            return
+
+        try:
+            im = Image.open(p).convert("RGBA")
+            w0, h0 = im.size
+            max_w, max_h = 360, 120
+            if h0 > 0 and w0 > 0:
+                scale = min(float(max_w) / float(w0), float(max_h) / float(h0), 1.0)
+            else:
+                scale = 1.0
+            w = max(1, int(w0 * scale))
+            h = max(1, int(h0 * scale))
+            im = im.resize((w, h), Image.LANCZOS)
+            self.watermark_preview_img = ctk.CTkImage(light_image=im, dark_image=im, size=(w, h))
+            self.watermark_preview.configure(text="", image=self.watermark_preview_img)
+            if getattr(self, "watermark_path_label", None):
+                self.watermark_path_label.configure(text=f"Arquivo: {p}  ({w0}x{h0})")
+        except Exception:
+            self.watermark_preview_img = None
+            self.watermark_preview.configure(text="Falha ao carregar imagem.", image=None)
+            if getattr(self, "watermark_path_label", None):
+                self.watermark_path_label.configure(text=f"Arquivo: {p}")
+
+    def render_watermark(self):
+        self.header("Marca d'água", "Envie uma imagem e ative/desative a exibição.")
+
+        card = ctk.CTkFrame(self.main_area, fg_color="white", corner_radius=10)
+        card.pack(fill="x", pady=10, ipady=15)
+        ctk.CTkLabel(card, text="Configurações", font=("Segoe UI", 14, "bold"), text_color=VERITAS_BLUE).pack(anchor="w", padx=25, pady=(15, 5))
 
         self.var_watermark = tk.BooleanVar(value=bool(get_app_setting("watermark_enabled", True)))
 
@@ -683,8 +748,8 @@ class DashboardWindow(ctk.CTkToplevel):
                 pass
 
         ctk.CTkCheckBox(
-            card3,
-            text="Marca d'água (watermark.png)",
+            card,
+            text="Ativar marca d'água",
             variable=self.var_watermark,
             command=_on_toggle_watermark,
             onvalue=True,
@@ -693,7 +758,74 @@ class DashboardWindow(ctk.CTkToplevel):
             hover_color=VERITAS_BLUE_HOVER,
             text_color="#333",
             font=("Segoe UI", 13),
-        ).pack(anchor="w", padx=25, pady=(5, 15))
+        ).pack(anchor="w", padx=25, pady=(5, 10))
+
+        self.watermark_path_label = ctk.CTkLabel(card, text="Arquivo: ...", text_color="#777", font=("Segoe UI", 11))
+        self.watermark_path_label.pack(anchor="w", padx=25, pady=(0, 10))
+
+        actions = ctk.CTkFrame(card, fg_color="transparent")
+        actions.pack(fill="x", padx=25, pady=(0, 10))
+
+        def _upload_watermark():
+            p = filedialog.askopenfilename(
+                parent=self,
+                title="Selecione a imagem da marca d'água",
+                filetypes=[("Imagens", "*.png;*.jpg;*.jpeg"), ("PNG", "*.png"), ("JPG", "*.jpg;*.jpeg")],
+            )
+            if not p:
+                return
+
+            dest = self._watermark_user_path()
+            try:
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+            except Exception:
+                pass
+
+            try:
+                # Normaliza salvando sempre como PNG (watermark.png) no AppData
+                im = Image.open(p).convert("RGBA")
+                im.save(dest, format="PNG")
+            except Exception:
+                # Fallback: tenta copiar como está
+                try:
+                    shutil.copy2(p, dest)
+                except Exception:
+                    ModernPopUp(self, "Erro", "Não consegui salvar a imagem da marca d'água.")
+                    return
+
+            self._update_watermark_preview()
+            try:
+                # Recarrega no player imediatamente (se estiver habilitado)
+                self.player.configurar_watermark()
+            except Exception:
+                pass
+
+            ModernPopUp(self, "Ok", "Marca d'água atualizada com sucesso!")
+
+        ctk.CTkButton(
+            actions,
+            text="⬆️  Enviar imagem",
+            height=38,
+            fg_color=VERITAS_BLUE,
+            hover_color=VERITAS_BLUE_HOVER,
+            command=_upload_watermark,
+        ).pack(side="left")
+
+        ctk.CTkLabel(
+            card,
+            text="Dica: tamanho recomendado 200x40 (PNG com fundo transparente).",
+            text_color="#777",
+            font=("Segoe UI", 11),
+        ).pack(anchor="w", padx=25, pady=(0, 10))
+
+        preview_card = ctk.CTkFrame(self.main_area, fg_color="white", corner_radius=10)
+        preview_card.pack(fill="x", pady=10, ipady=15)
+        ctk.CTkLabel(preview_card, text="Prévia", font=("Segoe UI", 14, "bold"), text_color=VERITAS_BLUE).pack(anchor="w", padx=25, pady=(15, 10))
+
+        self.watermark_preview = ctk.CTkLabel(preview_card, text="Carregando...", text_color="#777")
+        self.watermark_preview.pack(anchor="w", padx=25, pady=(0, 15))
+        self.watermark_preview_img = None
+        self._update_watermark_preview()
 
     def select_root(self):
         p = filedialog.askdirectory(parent=self)

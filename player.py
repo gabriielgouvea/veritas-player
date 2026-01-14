@@ -39,9 +39,20 @@ WATERMARK_UI_FG = "white"
 WATERMARK_UI_IMAGE_MAX_HEIGHT = 34
 
 def _find_watermark_ui_image_path() -> str | None:
-    # Prioridade: override ao lado do .exe; fallback para recurso empacotado (resource_path)
+    # Prioridade:
+    # 1) arquivo do usuário (AppData) -> permite trocar sem mexer na pasta do app
+    # 2) ao lado do executável/projeto
+    # 3) recurso empacotado (resource_path)
+    for name in ("watermark.png", "logo_watermark.png"):
+        try:
+            p = os.path.join(DATA_FOLDER, name)
+            if os.path.exists(p):
+                return p
+        except Exception:
+            pass
+
     app_dir = _get_app_dir()
-    for name in ("logo_watermark.png", "watermark.png"):
+    for name in ("watermark.png", "logo_watermark.png"):
         # 1) Ao lado do executável (permite o usuário substituir fácil)
         p = os.path.join(app_dir, name)
         if os.path.exists(p):
