@@ -445,7 +445,50 @@ class DashboardWindow(ctk.CTkToplevel):
         self.e_hr.bind("<KeyRelease>", self.masc_hr)
         self.e_hr.bind("<Return>", self.add_hr)
         ctk.CTkButton(fh, text="+", width=40, command=self.add_hr, fg_color=VERITAS_BLUE).pack(side="left", padx=5)
-        self.fr_hr = ctk.CTkFrame(self.last_card, fg_color="#F0F0F0", height=50)
+
+        def _parse_mm_from_entry():
+            v = (self.e_hr.get() or "").strip()
+            if len(v) != 5 or v[2] != ":":
+                return None
+            try:
+                hh = int(v[:2])
+                mm = int(v[3:])
+            except Exception:
+                return None
+            if hh < 0 or hh > 23 or mm < 0 or mm > 59:
+                return None
+            return mm
+
+        def _gerar_dia_inteiro_1h():
+            """Gera horários 00..23 com o mesmo minuto (offset) e adiciona à lista."""
+            mm = _parse_mm_from_entry()
+            if mm is None:
+                mm = 0
+            novos = [f"{h:02d}:{mm:02d}" for h in range(24)]
+            changed = False
+            for t in novos:
+                if t not in self.l_hours:
+                    self.l_hours.append(t)
+                    changed = True
+            if changed:
+                self.l_hours.sort()
+                self.render_tags(self.fr_hr, self.l_hours, self.rm_hr)
+            try:
+                self.e_hr.delete(0, "end")
+            except Exception:
+                pass
+
+        ctk.CTkButton(
+            fh,
+            text="Gerar dia inteiro (1h)",
+            height=40,
+            command=_gerar_dia_inteiro_1h,
+            fg_color="#E3F2FD",
+            text_color=VERITAS_BLUE,
+            hover_color="#D6ECFF",
+        ).pack(side="left", padx=(10, 0))
+
+        self.fr_hr = ctk.CTkFrame(self.last_card, fg_color="#F0F0F0")
         self.fr_hr.pack(fill="x", padx=20, pady=5)
         self.l_hours = []
 
@@ -798,12 +841,26 @@ class DashboardWindow(ctk.CTkToplevel):
         self.render_tags(self.fr_dt, self.l_dates, self.rm_dt)
         
     def render_tags(self, p, l, cb):
-        for w in p.winfo_children(): w.destroy()
-        for v in l: 
-            f=ctk.CTkFrame(p, fg_color="#E3F2FD", corner_radius=5)
-            f.pack(side="left", padx=5, pady=5)
+        for w in p.winfo_children():
+            w.destroy()
+
+        # Evita “sumir” com horários quando a lista fica grande.
+        # Renderiza em múltiplas linhas, mantendo o form dentro do scroll.
+        max_cols = 10
+        for idx, v in enumerate(l):
+            r = idx // max_cols
+            c = idx % max_cols
+            f = ctk.CTkFrame(p, fg_color="#E3F2FD", corner_radius=5)
+            f.grid(row=r, column=c, padx=5, pady=5, sticky="w")
             ctk.CTkLabel(f, text=v, text_color=VERITAS_BLUE).pack(side="left", padx=5)
-            ctk.CTkButton(f, text="x", width=15, fg_color="transparent", text_color="red", command=lambda x=v: cb(x)).pack(side="left")
+            ctk.CTkButton(
+                f,
+                text="x",
+                width=15,
+                fg_color="transparent",
+                text_color="red",
+                command=lambda x=v: cb(x),
+            ).pack(side="left")
 
     def render_donate(self):
         self.header("Apoie o Projeto", "Ajude a manter o Veritas Player gratuito e atualizado.")
