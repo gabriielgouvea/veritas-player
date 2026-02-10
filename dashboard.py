@@ -446,7 +446,12 @@ class DashboardWindow(ctk.CTkToplevel):
         self.e_hr.bind("<Return>", self.add_hr)
         ctk.CTkButton(fh, text="+", width=40, command=self.add_hr, fg_color=VERITAS_BLUE).pack(side="left", padx=5)
 
-        def _parse_mm_from_entry():
+        ctk.CTkLabel(fh, text="A cada (h):", text_color="#555").pack(side="left", padx=(12, 6))
+        self.e_hr_interval = ctk.CTkEntry(fh, width=55)
+        self.e_hr_interval.pack(side="left")
+        self.e_hr_interval.insert(0, "1")
+
+        def _parse_hhmm_from_entry():
             v = (self.e_hr.get() or "").strip()
             if len(v) != 5 or v[2] != ":":
                 return None
@@ -457,22 +462,53 @@ class DashboardWindow(ctk.CTkToplevel):
                 return None
             if hh < 0 or hh > 23 or mm < 0 or mm > 59:
                 return None
-            return mm
+            return hh, mm
 
-        def _gerar_dia_inteiro_1h():
-            """Gera horários 00..23 com o mesmo minuto (offset) e adiciona à lista."""
-            mm = _parse_mm_from_entry()
-            if mm is None:
-                mm = 0
-            novos = [f"{h:02d}:{mm:02d}" for h in range(24)]
+        def _parse_interval_hours():
+            raw = (self.e_hr_interval.get() or "").strip()
+            try:
+                n = int(raw)
+            except Exception:
+                n = 1
+            if n < 1:
+                n = 1
+            if n > 24:
+                n = 24
+            return n
+
+        def _gerar_dia_inteiro_intervalo():
+            """Gera horários do dia a cada N horas, a partir do HH:MM digitado."""
+            parsed = _parse_hhmm_from_entry()
+            if parsed is None:
+                hh, mm = 0, 0
+            else:
+                hh, mm = parsed
+            step_h = _parse_interval_hours()
+
+            novos = []
+            h = hh
+            while h <= 23:
+                novos.append(f"{h:02d}:{mm:02d}")
+                h += step_h
+
+            # Se for "Somente hoje", remove horários já passados.
+            if getattr(self, "v_hoje", None) is not None and self.v_hoje.get():
+                try:
+                    now = datetime.now()
+                    novos = [t for t in novos if (int(t[:2]), int(t[3:])) > (now.hour, now.minute)]
+                except Exception:
+                    pass
+
             changed = False
             for t in novos:
                 if t not in self.l_hours:
                     self.l_hours.append(t)
                     changed = True
+
             if changed:
                 self.l_hours.sort()
                 self.render_tags(self.fr_hr, self.l_hours, self.rm_hr)
+
             try:
                 self.e_hr.delete(0, "end")
             except Exception:
@@ -480,9 +516,9 @@ class DashboardWindow(ctk.CTkToplevel):
 
         ctk.CTkButton(
             fh,
-            text="Gerar dia inteiro (1h)",
+            text="Gerar dia inteiro",
             height=40,
-            command=_gerar_dia_inteiro_1h,
+            command=_gerar_dia_inteiro_intervalo,
             fg_color="#E3F2FD",
             text_color=VERITAS_BLUE,
             hover_color="#D6ECFF",
